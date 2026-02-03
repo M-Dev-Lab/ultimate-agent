@@ -16,8 +16,9 @@ import structlog
 
 from app.core.config import settings
 from app.models.schemas import ErrorResponse
-from app.api import build_router, analysis_router, health_router, websocket_router
+from app.api import build_router, analysis_router, health_router, websocket_router, memory_router
 from app.db.session import init_db, close_db
+from app.memory import init_memory_system, shutdown_memory_system
 
 # Configure structured logging
 structlog.configure(
@@ -212,6 +213,7 @@ app.include_router(build_router)
 app.include_router(analysis_router)
 app.include_router(health_router)
 app.include_router(websocket_router)
+app.include_router(memory_router)
 
 logger.info("FastAPI application initialized", app=settings.app_name, version=settings.app_version)
 
@@ -220,13 +222,19 @@ logger.info("FastAPI application initialized", app=settings.app_name, version=se
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and prepare application on startup"""
+    """Initialize database and memory on startup"""
     logger.info("Starting application", app=settings.app_name)
     try:
+        # Initialize database
         await init_db()
         logger.info("Database initialization successful")
+        
+        # Initialize persistent memory system
+        init_memory_system()
+        logger.info("Persistent memory system initialized")
+        
     except Exception as e:
-        logger.error("Database initialization failed", error=str(e))
+        logger.error("Startup initialization failed", error=str(e))
         raise
 
 
@@ -235,6 +243,11 @@ async def shutdown_event():
     """Clean up resources on application shutdown"""
     logger.info("Shutting down application")
     try:
+        # Shutdown memory system (consolidates memory)
+        shutdown_memory_system()
+        logger.info("Memory system shutdown complete")
+        
+        # Close database connections
         await close_db()
         logger.info("Database connections closed")
     except Exception as e:
