@@ -350,33 +350,54 @@ Need more help? Visit the documentation or contact support.
     async def _handle_analysis_request(self, update: Update, text: str):
         """Handle code analysis request"""
         try:
-            await update.message.reply_text("🔍 Analyzing your code...")
+            await update.message.reply_text("🔍 Analyzing your code with Qwen3-coder cloud...")
             
             # Extract code from message (between markdown code blocks or as plain text)
             code_to_analyze = text
             if "```" in text:
                 code_to_analyze = text.split("```")[1].strip()
             
-            # Log analysis
-            logger.info("Code analysis started", user_id=update.effective_user.id)
+            # Detect language from code blocks or ask user
+            language = "python"
+            if "```javascript" in text or "```js" in text or "```typescript" in text or "```ts" in text:
+                language = "javascript"
+            elif "```java" in text:
+                language = "java"
+            elif "```cpp" in text or "```c++" in text:
+                language = "cpp"
+            elif "```go" in text:
+                language = "go"
+            elif "```rust" in text:
+                language = "rust"
             
-            # Return analysis results
-            analysis_results = {
-                "complexity": "medium",
-                "maintainability": "good",
-                "security": "safe",
-                "performance": "acceptable",
-                "issues": 0
-            }
+            # Get agent workflow and analyze
+            workflow = get_agent_workflow()
+            analysis_results = await workflow.analyze_code(
+                code=code_to_analyze,
+                language=language,
+                focus_areas=["security", "performance", "maintainability"]
+            )
             
+            # Format response
             response = "✅ **Code Analysis Complete**\n\n"
-            response += f"• Complexity: {analysis_results['complexity']}\n"
-            response += f"• Maintainability: {analysis_results['maintainability']}\n"
-            response += f"• Security: {analysis_results['security']}\n"
-            response += f"• Performance: {analysis_results['performance']}\n"
-            response += f"• Issues Found: {analysis_results['issues']}"
+            response += f"**Language:** {language}\n"
+            response += f"**Model:** {analysis_results.get('model', 'Qwen3-coder')}\n"
+            response += f"**Lines of Code:** {analysis_results['metrics'].get('lines_of_code', 'N/A')}\n\n"
+            
+            if analysis_results['issues']:
+                response += "**Issues Found:**\n"
+                for issue in analysis_results['issues'][:5]:
+                    response += f"• [{issue.get('severity', 'info').upper()}] {issue.get('type', 'Issue')}: {issue.get('description', 'N/A')}\n"
+            else:
+                response += "**No issues found! ✨**\n"
+            
+            if analysis_results['recommendations']:
+                response += "\n**Recommendations:**\n"
+                for rec in analysis_results['recommendations'][:3]:
+                    response += f"• {rec}\n"
             
             await update.message.reply_text(response, parse_mode="Markdown")
+            logger.info("Code analysis completed", user_id=update.effective_user.id, issues=len(analysis_results['issues']), model=analysis_results.get('model'))
         except Exception as e:
             logger.error(f"Analysis request failed: {e}")
             await update.message.reply_text("❌ Analysis failed. Please try again.")
@@ -384,33 +405,41 @@ Need more help? Visit the documentation or contact support.
     async def _handle_generation_request(self, update: Update, text: str):
         """Handle code generation request"""
         try:
-            await update.message.reply_text("✨ Generating code...")
+            await update.message.reply_text("✨ Generating code with Qwen3-coder cloud...")
             
             # Extract goal from message
-            goal = text.replace("/generate", "").strip()
+            goal = text.replace("generate", "").strip()
             if not goal:
                 goal = "A well-structured Python function"
             
-            logger.info("Code generation started", user_id=update.effective_user.id, goal=goal)
+            # Detect language preference
+            language = "python"
+            if "javascript" in goal.lower() or "typescript" in goal.lower() or "nodejs" in goal.lower():
+                language = "javascript"
+            elif "java" in goal.lower():
+                language = "java"
+            elif "rust" in goal.lower():
+                language = "rust"
+            elif "go" in goal.lower() or "golang" in goal.lower():
+                language = "go"
             
-            # Generate code
-            generated_code = f"""#!/usr/bin/env python3
-\"\"\"
-Auto-generated code for: {goal}
-\"\"\"
-
-def solution():
-    \"\"\"Solution for {goal}\"\"\"
-    pass
-
-
-if __name__ == "__main__":
-    result = solution()
-    print(f"Result: {{result}}")
-"""
+            logger.info("Code generation started", user_id=update.effective_user.id, goal=goal, language=language)
             
-            response = f"```python\n{generated_code}\n```\n\n✅ Code generated successfully!"
+            # Get agent workflow and generate code
+            workflow = get_agent_workflow()
+            generated_code = await workflow.generate_code(
+                specification=goal,
+                language=language,
+                context="Generated via Telegram bot using Qwen3-coder"
+            )
+            
+            # Format response
+            response = f"```{language}\n{generated_code}\n```\n\n✅ Code generated with Qwen3-coder!"
+            response += f"\n**Language:** {language}"
+            response += f"\n**Lines:** {len(generated_code.split(chr(10)))}"
+            
             await update.message.reply_text(response, parse_mode="Markdown")
+            logger.info("Code generation completed", user_id=update.effective_user.id, lines=len(generated_code.split('\n')))
         except Exception as e:
             logger.error(f"Generation request failed: {e}")
             await update.message.reply_text("❌ Code generation failed. Please try again.")
@@ -423,7 +452,7 @@ if __name__ == "__main__":
             project_name = "_".join(parts[2:])
             
             await query.edit_message_text(
-                f"🚀 Starting build for `{project_name}` in {language.upper()}...",
+                f"🚀 Starting build for `{project_name}` in {language.upper()} using Qwen3-coder...",
                 parse_mode="Markdown"
             )
             
@@ -436,7 +465,7 @@ if __name__ == "__main__":
                 user_id=query.from_user.id
             )
             db.add(build)
-            db.commit()
+            db.flush()
             
             logger.info(
                 "Build created",
@@ -446,13 +475,44 @@ if __name__ == "__main__":
                 user_id=query.from_user.id
             )
             
-            # Send completion message
-            await query.edit_message_text(
-                f"✅ Build `{build.id}` created for `{project_name}` ({language.upper()})\n"
-                f"Language: {language}\n"
-                f"Status: Pending",
-                parse_mode="Markdown"
-            )
+            # Generate build using Agent Workflow with Qwen3-coder
+            try:
+                workflow = get_agent_workflow()
+                specification = f"Create a complete {language} project for {project_name}"
+                
+                generated_code = await workflow.generate_code(
+                    specification=specification,
+                    language=language,
+                    context=f"Project: {project_name}, Type: Starter project"
+                )
+                
+                # Update build status
+                build.status = BuildStatus.COMPLETED
+                build.result = generated_code[:1000]  # Store first 1000 chars as preview
+                
+                db.add(build)
+                db.commit()
+                
+                response = f"✅ **Build Complete**\n\n"
+                response += f"**Project:** {project_name}\n"
+                response += f"**Language:** {language.upper()}\n"
+                response += f"**Model:** Qwen3-coder (Ollama Cloud)\n"
+                response += f"**Build ID:** `{build.id[:8]}`\n\n"
+                response += f"**Generated (Preview):**\n```{language}\n{generated_code[:300]}...\n```"
+                
+                await query.edit_message_text(response, parse_mode="Markdown")
+                
+                logger.info("Build completed with Qwen3-coder", build_id=build.id, project=project_name)
+            except Exception as build_error:
+                logger.error(f"Build generation failed: {build_error}")
+                build.status = BuildStatus.FAILED
+                db.add(build)
+                db.commit()
+                
+                await query.edit_message_text(
+                    f"❌ Build failed: {str(build_error)[:100]}",
+                    parse_mode="Markdown"
+                )
             
             db.close()
         except Exception as e:

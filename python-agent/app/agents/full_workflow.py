@@ -19,6 +19,7 @@ import structlog
 
 from app.db.vector import get_vector_store
 from app.core.config import settings
+from app.integrations.ollama import get_ollama_client
 
 logger = structlog.get_logger(__name__)
 
@@ -161,39 +162,92 @@ class ToolRegistry:
         language: str,
         focus_areas: List[str] = None
     ) -> Dict[str, Any]:
-        """Analyze code for issues and recommendations"""
+        """Analyze code using Ollama (Qwen3-coder cloud)"""
         if focus_areas is None:
             focus_areas = ["security", "performance", "maintainability"]
         
-        analysis = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "language": language,
-            "focus_areas": focus_areas,
-            "issues": [],
-            "recommendations": [],
-            "metrics": {
-                "lines_of_code": len(code.split('\n')),
-                "cyclomatic_complexity": 2,  # Placeholder
+        try:
+            # Build analysis prompt
+            prompt = f"""Analyze the following {language} code and provide detailed insights.
+
+CODE:
+{code}
+
+FOCUS AREAS:
+{', '.join(focus_areas)}
+
+Provide analysis in this JSON format:
+{{
+    "issues": [
+        {{"severity": "high|medium|low", "type": "category", "description": "details", "line": N}}
+    ],
+    "recommendations": ["recommendation 1", "recommendation 2"],
+    "metrics": {{"complexity": "N", "maintainability_score": "0-100"}},
+    "summary": "Overall assessment"
+}}
+
+Return ONLY the JSON, no other text."""
+            
+            # Get Ollama client
+            ollama_client = get_ollama_client()
+            
+            mode = "Ollama Cloud (Qwen3-coder)" if ollama_client.is_cloud else f"Local Ollama ({settings.ollama_model})"
+            logger.info(f"Analyzing code using {mode}", language=language, lines=len(code.split('\n')))
+            
+            # Generate analysis
+            response = await ollama_client.generate(
+                prompt=prompt,
+                model=settings.ollama_model,
+                temperature=0.3,  # Lower temperature for consistent analysis
+                top_p=0.9
+            )
+            
+            # Parse JSON response
+            try:
+                # Extract JSON from response
+                response = response.strip()
+                if response.startswith("```"):
+                    response = response.split("```")[1]
+                    if response.startswith("json"):
+                        response = response[4:]
+                
+                analysis_data = json.loads(response)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, create structured response
+                analysis_data = {
+                    "issues": [],
+                    "recommendations": ["Unable to parse detailed analysis"],
+                    "metrics": {"complexity": "unknown"},
+                    "summary": response[:200]
+                }
+            
+            # Build result
+            analysis = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "language": language,
+                "focus_areas": focus_areas,
+                "issues": analysis_data.get("issues", []),
+                "recommendations": analysis_data.get("recommendations", []),
+                "metrics": {
+                    "lines_of_code": len(code.split('\n')),
+                    **analysis_data.get("metrics", {})
+                },
+                "summary": analysis_data.get("summary", ""),
+                "model": mode
             }
-        }
+            
+            logger.info(
+                f"Code analysis complete",
+                language=language,
+                issues=len(analysis["issues"]),
+                mode=mode
+            )
+            
+            return analysis
         
-        # Mock analysis - in production, use Ollama or pylint
-        if "sql" in code.lower() and "security" in focus_areas:
-            analysis["issues"].append({
-                "severity": "high",
-                "type": "SQL Injection",
-                "description": "Potential SQL injection vulnerability"
-            })
-        
-        if "TODO" in code and "maintainability" in focus_areas:
-            analysis["issues"].append({
-                "severity": "low",
-                "type": "Code Quality",
-                "description": "TODO comments found"
-            })
-        
-        logger.info(f"Code analysis complete", language=language, issues=len(analysis["issues"]))
-        return analysis
+        except Exception as e:
+            logger.error(f"Code analysis failed: {e}")
+            raise
     
     async def generate_code(
         self,
@@ -201,48 +255,69 @@ class ToolRegistry:
         language: str,
         context: str = ""
     ) -> str:
-        """Generate code using Ollama"""
+        """Generate code using Ollama (Qwen3-coder cloud)"""
         try:
-            # Build prompt
-            prompt = f"""
-Generate {language} code based on the following specification:
+            # Build comprehensive prompt for Qwen3-coder
+            prompt = f"""You are an expert code generator. Generate high-quality, production-ready code.
 
 SPECIFICATION:
 {specification}
 
+LANGUAGE:
+{language}
+
 CONTEXT:
-{context if context else "None provided"}
+{context if context else "No additional context provided"}
 
-Requirements:
-- Follow {language} best practices
-- Include error handling
+REQUIREMENTS:
+- Follow {language} best practices and conventions
+- Include comprehensive error handling
 - Add type hints/annotations where applicable
-- Include docstrings/comments
-- Make code production-ready
+- Include clear docstrings/comments
+- Make code production-ready and maintainable
+- Avoid security vulnerabilities
+- Optimize for performance
 
-Return only the code, no explanations.
-"""
+Generate ONLY the code, no explanations or markdown formatting."""
             
-            # In production, call Ollama
-            # Generate structured code based on specification
-            generated_code = f'''"""
-Module: Auto-generated from specification
-Specification: {specification[:100]}...
-Generated: {datetime.now().isoformat()}
-"""
-
-def main():
-    """Main entry point based on specification"""
-    print(f"Executing specification: {specification[:50]}...")
-    return True
-
-
-if __name__ == "__main__":
-    main()
-'''
+            # Get Ollama client and generate
+            ollama_client = get_ollama_client()
             
-            logger.info(f"Code generated", language=language, lines=len(generated_code.split('\n')))
+            # Log model info
+            mode = "Ollama Cloud (Qwen3-coder)" if ollama_client.is_cloud else f"Local Ollama ({settings.ollama_model})"
+            logger.info(f"Generating code using {mode}", language=language, spec_length=len(specification))
+            
+            generated_code = await ollama_client.generate(
+                prompt=prompt,
+                model=settings.ollama_model,
+                temperature=0.7,
+                top_p=0.9,
+                num_predict=2000
+            )
+            
+            if not generated_code:
+                raise ValueError("Ollama returned empty response")
+            
+            # Clean up response
+            generated_code = generated_code.strip()
+            if generated_code.startswith("```"):
+                # Remove markdown code blocks if present
+                lines = generated_code.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                generated_code = "\n".join(lines).strip()
+            
+            logger.info(
+                f"Code generation complete",
+                language=language,
+                lines=len(generated_code.split('\n')),
+                mode=mode
+            )
+            
             return generated_code
+        
         except Exception as e:
             logger.error(f"Code generation failed: {e}")
             raise

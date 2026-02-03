@@ -58,25 +58,42 @@ export class OllamaQwenTool {
 
   private async initializeModel(): Promise<void> {
     try {
+      // Check for Claude API first
+      const claudeApiKey = process.env.CLAUDE_API_KEY;
+      if (claudeApiKey) {
+        this.model = 'claude-api:primary';
+        console.log(`✅ Using model: ${this.model} (Claude API)`);
+        return;
+      }
+
+      // Fallback to checking environment variable for Qwen3-code cloud
+      const qwenCloud = process.env.QWEN3_CODE_CLOUD;
+      if (qwenCloud) {
+        this.model = 'qwen3-coder:cloud';
+        console.log(`✅ Using model: ${this.model} (Qwen3 Cloud)`);
+        return;
+      }
+
+      // Then try local models
       const models = await this.listModels();
       
       if (models.length === 0) {
         console.warn('⚠️ No Ollama models found. Please pull a model first.');
-        this.model = 'llava-phi3:latest';
+        this.model = 'qwen2.5-coder:7b';
         return;
       }
 
       const modelNames = models.map((m: any) => m.name || m);
       console.log(`📦 Found ${modelNames.length} local models: ${modelNames.join(', ')}`);
 
-      // Priority order - prefer smaller models first due to memory constraints
+      // Priority order - prefer Qwen models first, then other code models
       const preferredModels = [
-        'llava-phi3:latest',
-        'llava:7b',
-        'bakllava:latest',
-        'llama3.2',
+        'qwen3-coder',
         'qwen2.5-coder',
-        'codellama'
+        'codellama',
+        'llama2-uncensored',
+        'neural-chat',
+        'llava:7b'
       ];
 
       // Find first available preferred model
@@ -101,11 +118,11 @@ export class OllamaQwenTool {
         this.model = selectedModel;
         console.log(`✅ Using model: ${this.model}`);
       } else {
-        this.model = 'llava-phi3:latest';
+        this.model = 'qwen2.5-coder:7b';
       }
     } catch (error) {
       console.warn('⚠️ Failed to detect models, using default:', error);
-      this.model = 'llava-phi3:latest';
+      this.model = 'qwen2.5-coder:7b';
     }
   }
 
