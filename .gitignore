@@ -10,6 +10,42 @@ yarn-debug.log*
 yarn-error.log*
 
 # ============================================
+# Python & Virtual Environments
+# ============================================
+python-agent/venv/
+python-agent/__pycache__/
+python-agent/.pytest_cache/
+python-agent/*.egg-info/
+python-agent/dist/
+python-agent/build/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============================================
 # Environment & Secrets
 # ============================================
 .env
@@ -66,6 +102,13 @@ qwen.log
 .vscode/settings.json
 .idea/
 *.iml
+.pyc
+.pyo
+*.pyc
+*.pyo
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 # ============================================
 # Runtime & Build Outputs
@@ -74,6 +117,15 @@ outputs/
 memory/
 .cache/
 *.pid
+htmlcov/
+.coverage
+.tox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
 # ============================================
 # System Files
@@ -88,6 +140,20 @@ workspace/
 .local/
 temp/
 tmp/
+
+# ============================================
+# Python Agent Specific
+# ============================================
+python-agent/.env.local
+python-agent/data/db/*.db
+python-agent/logs/
+python-agent/outputs/
+python-agent/app/__pycache__/
+python-agent/app/**/__pycache__/
+python-agent/tests/__pycache__/
+python-agent/.pytest_cache/
+python-agent/htmlcov/
+python-agent/.coverage
 
 # ============================================
 # Test Coverage
