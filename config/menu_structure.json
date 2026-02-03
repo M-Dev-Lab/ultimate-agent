@@ -1,0 +1,107 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-02-02",
+  "main_menu": {
+    "title": "🦞 Ultimate Coding Agent - Main Menu",
+    "description": "Select a category:",
+    "buttons": [
+      {
+        "id": "code",
+        "emoji": "🔨",
+        "label": "CODE",
+        "description": "Build, code, fix projects",
+        "callback_data": "menu_code"
+      },
+      {
+        "id": "ship",
+        "emoji": "🚀",
+        "label": "SHIP",
+        "description": "Deploy, monitor, audit",
+        "callback_data": "menu_ship"
+      },
+      {
+        "id": "social",
+        "emoji": "📱",
+        "label": "SOCIAL",
+        "description": "Post, schedule, analytics",
+        "callback_data": "menu_social"
+      },
+      {
+        "id": "brain",
+        "emoji": "🧠",
+        "label": "BRAIN",
+        "description": "Skills, memory, learning",
+        "callback_data": "menu_brain"
+      },
+      {
+        "id": "system",
+        "emoji": "⚙️",
+        "label": "SYSTEM",
+        "description": "Settings, logs, help",
+        "callback_data": "menu_system"
+      }
+    ]
+  },
+  "submenus": {
+    "code": {
+      "title": "🔨 CODE Menu",
+      "parent": "main",
+      "buttons": [
+        {"emoji": "📦", "label": "Build", "callback_data": "action_build"},
+        {"emoji": "💻", "label": "Code", "callback_data": "action_code"},
+        {"emoji": "🔧", "label": "Fix", "callback_data": "action_fix"},
+        {"emoji": "🧪", "label": "Test", "callback_data": "action_test"},
+        {"emoji": "📚", "label": "Docs", "callback_data": "action_docs"},
+        {"emoji": "⬅️", "label": "Back", "callback_data": "menu_main"}
+      ]
+    },
+    "ship": {
+      "title": "🚀 SHIP Menu",
+      "parent": "main",
+      "buttons": [
+        {"emoji": "🚢", "label": "Deploy", "callback_data": "action_deploy"},
+        {"emoji": "📊", "label": "Monitor", "callback_data": "action_monitor"},
+        {"emoji": "🔒", "label": "Audit", "callback_data": "action_audit"},
+        {"emoji": "💾", "label": "Backup", "callback_data": "action_backup"},
+        {"emoji": "📈", "label": "Status", "callback_data": "action_status"},
+        {"emoji": "⬅️", "label": "Back", "callback_data": "menu_main"}
+      ]
+    },
+    "social": {
+      "title": "📱 SOCIAL Menu",
+      "parent": "main",
+      "buttons": [
+        {"emoji": "✍️", "label": "Post", "callback_data": "action_post"},
+        {"emoji": "🎯", "label": "Viral", "callback_data": "action_viral"},
+        {"emoji": "📅", "label": "Schedule", "callback_data": "action_schedule"},
+        {"emoji": "📈", "label": "Analytics", "callback_data": "action_social_analytics"},
+        {"emoji": "🔥", "label": "Trending", "callback_data": "action_trending"},
+        {"emoji": "⬅️", "label": "Back", "callback_data": "menu_main"}
+      ]
+    },
+    "brain": {
+      "title": "🧠 BRAIN Menu",
+      "parent": "main",
+      "buttons": [
+        {"emoji": "💡", "label": "Skills", "callback_data": "action_skills"},
+        {"emoji": "📚", "label": "Memory", "callback_data": "action_memory"},
+        {"emoji": "📊", "label": "Analytics", "callback_data": "action_analytics"},
+        {"emoji": "🎓", "label": "Learn", "callback_data": "action_learn"},
+        {"emoji": "🔄", "label": "Improve", "callback_data": "action_improve"},
+        {"emoji": "⬅️", "label": "Back", "callback_data": "menu_main"}
+      ]
+    },
+    "system": {
+      "title": "⚙️ SYSTEM Menu",
+      "parent": "main",
+      "buttons": [
+        {"emoji": "⚙️", "label": "Settings", "callback_data": "action_settings"},
+        {"emoji": "❤️", "label": "Heartbeat", "callback_data": "action_heartbeat"},
+        {"emoji": "📋", "label": "Logs", "callback_data": "action_logs"},
+        {"emoji": "🔧", "label": "Config", "callback_data": "action_config"},
+        {"emoji": "❓", "label": "Help", "callback_data": "action_help"},
+        {"emoji": "⬅️", "label": "Back", "callback_data": "menu_main"}
+      ]
+    }
+  }
+}

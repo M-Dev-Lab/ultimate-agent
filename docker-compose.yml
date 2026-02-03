@@ -1,0 +1,35 @@
+apps:
+  - name: ultimate-agent-qwen
+    repo: https://github.com/your-username/ultimate-agent-qwen
+    branch: main
+    run_options:
+      env: NODE_ENV=production
+      env_file: .env
+
+# Human-readable instructions
+name: Ultimate Agent + OpenCode + Qwen
+
+# Restart policy
+restart_policy:
+  type: on_failure
+  max_restarts: 5
+  backoff_seconds: [5, 15, 30, 60, 120]
+
+# Update strategy
+update_strategy:
+  type: rolling_update
+  rolling_update_policy:
+    parallel: 1
+    delay: 10s
+    failure_action: rollback
+    max_failure_percent: 25
+
+# Health checks
+healthchecks:
+  web:
+    port: 3000
+    path: /health
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s

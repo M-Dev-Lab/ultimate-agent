@@ -1,0 +1,19 @@
+{
+  "name": "ultimate-agent-qwen",
+  "version": "1.0.0",
+  "description": "Ultimate Agent with OpenCode + Qwen",
+  "main": "src/server-simple.js",
+  "scripts": {
+    "start": "node src/server-simple.js",
+    "dev": "node src/server-simple.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0",
+    "dotenv": "^16.4.1",
+    "openai": "^4.28.4"
+  },
+  "keywords": ["ai", "qwen", "agent", "coding"],
+  "author": "Ultimate Agent",
+  "license": "MIT"
+}

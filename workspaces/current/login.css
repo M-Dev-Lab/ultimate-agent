@@ -1,0 +1,143 @@
+// Generated code for login.css
+{
+  "page": {
+    "name": "login",
+    "title": "Login Page",
+    "description": "A responsive and performant login page using React and Next.js.",
+    "css": ["login.css"],
+    "files": [
+      {
+        "path": "pages/login.js"
+      }
+    ]
+  },
+  "components": {
+    "LoginForm": {
+      "name": "LoginForm",
+      "title": "Login Form",
+      "description": "A form for users to enter their login credentials.",
+      "props": ["username", "password"],
+      "css": [],
+      "files": []
+    },
+    "ErrorMessage": {
+      "name": "ErrorMessage",
+      "title": "Error Message",
+      "description": "A message to display when an error occurs.",
+      "props": ["error"],
+      "css": [],
+      "files": []
+    }
+  },
+  "hooks": {
+    "useRouter": {
+      "name": "useRouter",
+      "title": "useRouter Hook",
+      "description": "A hook for accessing the Next.js router object.",
+      "props": [],
+      "css": [],
+      "files": []
+    },
+    "useSession": {
+      "name": "useSession",
+      "title": "useSession Hook",
+      "description": "A hook for managing session state in a Next.js app.",
+      "props": ["isLoggedIn"],
+      "css": [],
+      "files": []
+    }
+  },
+  "utils": {
+    "validateCredentials": {
+      "name": "validateCredentials",
+      "title": "validateCredentials Utility Function",
+      "description": "A function for validating user login credentials.",
+      "props": ["username", "password"],
+      "css": [],
+      "files": []
+    }
+  },
+  "types": {
+    "LoginFormProps": {
+      "name": "LoginFormProps",
+      "title": "Login Form Props Interface",
+      "description": "The props interface for the LoginForm component.",
+      "fields": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true,
+          "description": "The username of the user."
+        },
+        {
+          "name": "password",
+        	"type": "string",
+        	"required": true,
+        	"description": "The password of the user."
+        }
+      ]
+    },
+    "ErrorMessageProps": {
+      "name": "ErrorMessageProps",
+      "title": "Error Message Props Interface",
+      "description": "The props interface for the ErrorMessage component.",
+      "fields": [
+        {
+          "name": "error",
+          "type": "string",
+          "required": true,
+          "description": "An error message to display."
+        }
+      ]
+    },
+    "useRouterProps": {
+      "name": "useRouterProps",
+      "title": "useRouter Props Interface",
+      "description": "The props interface for the useRouter hook.",
+      "fields": []
+    },
+    "useSessionProps": {
+      "name": "useSessionProps",
+      "title": "useSession Props Interface",
+      "description": "The props interface for the useSession hook.",
+      "fields": [
+        {
+          "name": "isLoggedIn",
+          "type": "boolean",
+          "required": true,
+          "description": "A boolean indicating whether or not a user is logged in."
+        }
+      ]
+    },
+    "validateCredentialsProps": {
+      "name": "validateCredentialsProps",
+      "title": "validateCredentials Props Interface",
+      "description": "The props interface for the validateCredentials utility function.",
+      "fields": [
+        {
+          "name": "username",
+          "type": "string",
+          "required": true,
+          "description": "The username of the user."
+        },
+        {
+          "name": "password",
+        	"type": "string",
+        	"required": true,
+        	"description": "The password of the user."
+        }
+      ]
+    }
+  },
+  "css": [
+    "login.css"
+  ],
+  "files": [
+    "pages/login.js",
+    "components/LoginForm.js",
+    "components/ErrorMessage.js",
+    "hooks/useRouter.js",
+    "hooks/useSession.js",
+    "utils/validateCredentials.js"
+  ]
+}

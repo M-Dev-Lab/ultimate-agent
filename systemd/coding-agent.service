@@ -1,0 +1,43 @@
+[Unit]
+Description=Ultimate Coding Agent (Telegram + OpenCode + Qwen)
+Documentation=https://github.com/your-username/ultimate-agent-qwen
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zeds
+Group=zeds
+WorkingDirectory=/home/zeds/Desktop/ultimate-agent-qwen
+ExecStart=/usr/bin/npm run telegram
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=/home/zeds/Desktop/ultimate-agent-qwen/.env
+SyslogIdentifier=coding-agent
+StandardOutput=journal
+StandardError=journal
+LogLevel=info
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=80%
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/zeds/Desktop/ultimate-agent-qwen/data /home/zeds/Desktop/ultimate-agent-qwen/workspaces /home/zeds/Desktop/ultimate-agent-qwen/outputs /home/zeds/Desktop/ultimate-agent-qwen/logs
+
+# Health checks
+RestartPreStartSec=30
+TimeoutStartSec=60
+TimeoutStopSec=60
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=multi-user.target
+Alias=coding-agent.service

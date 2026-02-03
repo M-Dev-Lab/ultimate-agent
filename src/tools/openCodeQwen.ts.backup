@@ -1,0 +1,230 @@
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { QwenPatchPlan, QwenTask, ToolResult } from './types';
+import { OpenAI } from '@ai-sdk/openai-compatible';
+
+const execAsync = promisify(exec);
+
+export class OpenCodeQwenTool {
+  private client: OpenAI;
+  private workspace: string;
+  private model: string;
+
+  constructor(workspace: string = './workspaces/current') {
+    this.workspace = workspace;
+    this.client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || '',
+      baseURL: process.env.OPENAI_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    });
+    this.model = process.env.OPENAI_MODEL || 'qwen3-coder-plus';
+  }
+
+  async planEdits(goal: string, context?: string): Promise<QwenPatchPlan> {
+    try {
+      const prompt = `You are the lead planner agent for Ultimate Agent. Decompose this goal into specific subtasks for different agents.
+
+Goal: ${goal}
+
+Context: ${context || 'No additional context provided'}
+
+Break down into specific tasks for:
+- Frontend development (React, Next.js, Vue, etc.)
+- Backend development (Node.js, APIs, databases)
+- Mobile development (React Native, Flutter)
+- Testing and QA
+- Deployment and DevOps
+
+Return JSON:
+{
+  "goal": "original goal",
+  "tasks": [
+    {
+      "id": "task_id",
+      "type": "frontend|backend|mobile|testing|deployment", 
+      "agent": "frontend-agent|backend-agent|mobile-agent|tester|deployer",
+      "goal": "specific task goal",
+      "files": ["file1.js", "file2.ts"],
+      "dependencies": ["task_id1", "task_id2"],
+      "status": "pending"
+    }
+  ],
+  "estimatedTime": 15,
+  "model": "${this.model}"
+}`;
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 4000,
+      });
+
+      const content = response.choices[0]?.message?.content || '';
+      return JSON.parse(content);
+    } catch (error: any) {
+      throw new Error(`Qwen planning failed: ${error.message}`);
+    }
+  }
+
+  async executeAgent(agentName: string, task: QwenTask): Promise<ToolResult> {
+    const startTime = Date.now();
+    
+    try {
+      const agentPrompt = this.getAgentPrompt(agentName);
+      const taskPrompt = `${agentPrompt}
+
+Execute this task:
+${task.goal}
+
+Files to modify: ${task.files.join(', ')}
+
+Focus on clean, production-ready code with proper error handling.`;
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [{ role: 'user', content: taskPrompt }],
+        temperature: 0.2,
+        max_tokens: 8000,
+      });
+
+      const content = response.choices[0]?.message?.content || '';
+      
+      // Parse the response and apply changes
+      const changes = await this.parseAndApplyChanges(content, task.files);
+      
+      return {
+        success: true,
+        data: {
+          changes,
+          output: content,
+          agent: agentName,
+          task: task.id
+        },
+        executionTime: Date.now() - startTime
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+        executionTime: Date.now() - startTime
+      };
+    }
+  }
+
+  private getAgentPrompt(agentName: string): string {
+    const prompts = {
+      'frontend-agent': 'You are an expert frontend developer specializing in React, Next.js, TypeScript, and Tailwind CSS. Write modern, responsive, and performant code.',
+      'backend-agent': 'You are an expert backend developer specializing in Node.js, Express, APIs, databases, and cloud services.',
+      'mobile-agent': 'You are an expert mobile developer specializing in React Native and Flutter for iOS and Android.',
+      'tester': 'You are a QA engineer specializing in testing, debugging, and ensuring code quality.',
+      'deployer': 'You are a DevOps engineer specializing in deployment, CI/CD, and infrastructure management.'
+    };
+    return prompts[agentName as keyof typeof prompts] || 'You are a helpful software developer.';
+  }
+
+  private async parseAndApplyChanges(response: string, files: string[]): Promise<any[]> {
+    const changes = [];
+    
+    // Simple implementation for demo - in production this would be more sophisticated
+    for (const file of files) {
+      try {
+        const filePath = path.join(this.workspace, file);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        
+        // Extract code from response (simplified for demo)
+        const codeMatch = response.match(/```[\w]*\n([\s\S]*?)\n```/);
+        const code = codeMatch ? codeMatch[1] : `// Generated code for ${file}\n${response}`;
+        
+        await fs.writeFile(filePath, code);
+        changes.push({ file, action: 'created/modified', lines: code.split('\n').length });
+      } catch (error) {
+        changes.push({ file, action: 'error', error: (error as Error).message });
+      }
+    }
+    
+    return changes;
+  }
+
+  async testRun(commands: string[]): Promise<any> {
+    try {
+      const results = [];
+      
+      for (const command of commands) {
+        try {
+          const { stdout, stderr } = await execAsync(`cd ${this.workspace} && ${command}`, { timeout: 30000 });
+          results.push({
+            command,
+            success: !stderr,
+            output: stdout,
+            error: stderr
+          });
+        } catch (error: any) {
+          results.push({
+            command,
+            success: false,
+            error: error.message
+          });
+        }
+      }
+      
+      return {
+        passed: results.every(r => r.success),
+        output: results.map(r => r.output).join('\n'),
+        errors: results.filter(r => !r.success).map(r => r.error),
+        results
+      };
+    } catch (error: any) {
+      return {
+        passed: false,
+        output: '',
+        errors: [error.message],
+        results: []
+      };
+    }
+  }
+
+  async analyzeRepo(): Promise<string> {
+    try {
+      const { stdout } = await execAsync(`cd ${this.workspace} && find . -name "*.ts" -o -name "*.js" -o -name "*.json" | head -20`);
+      return `Repository analysis:\n${stdout}`;
+    } catch (error: any) {
+      throw new Error(`Repository analysis failed: ${error.message}`);
+    }
+  }
+
+  parseRateLimit(error?: string): { resetAt: number } | null {
+    if (!error) return null;
+    
+    // Parse rate limit reset time from Qwen error messages
+    const resetMatch = error.match(/reset at (\d+)/);
+    if (resetMatch) {
+      const resetTime = parseInt(resetMatch[1]);
+      return { resetAt: resetTime * 1000 };
+    }
+    
+    return null;
+  }
+
+  setWorkspace(workspace: string) {
+    this.workspace = workspace;
+  }
+
+  getWorkspace(): string {
+    return this.workspace;
+  }
+
+  getModel(): string {
+    return this.model;
+  }
+
+  async checkRateLimit(): Promise<{ requestsUsed: number; requestsRemaining: number; resetTime: number | null }> {
+    // Qwen has very generous limits, simulate for demo
+    return {
+      requestsUsed: Math.floor(Math.random() * 100),
+      requestsRemaining: 1900 + Math.floor(Math.random() * 100),
+      resetTime: Date.now() + 86400000 // 24 hours from now
+    };
+  }
+}

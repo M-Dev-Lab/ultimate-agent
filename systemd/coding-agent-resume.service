@@ -1,0 +1,12 @@
+[Unit]
+Description=Coding Agent Resume (Wake-on-LAN Hook)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl start coding-agent
+User=zeds
+Group=zeds
+
+[Install]
+WantedBy=network-online.target

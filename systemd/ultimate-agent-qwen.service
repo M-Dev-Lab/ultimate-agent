@@ -1,0 +1,43 @@
+[Unit]
+Description=Ultimate Agent + OpenCode + Qwen
+Documentation=https://github.com/your-username/ultimate-agent-qwen
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ultimate-agent
+Group=ultimate-agent
+WorkingDirectory=/opt/ultimate-agent-qwen
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/ultimate-agent-qwen/.env
+SyslogIdentifier=ultimate-agent-qwen
+StandardOutput=journal
+StandardError=journal
+LogLevel=info
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=80%
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ultimate-agent-qwen/data /opt/ultimate-agent-qwen/workspaces /opt/ultimate-agent-qwen/logs
+
+# Health checks
+RestartPreStartSec=30
+TimeoutStartSec=60
+TimeoutStopSec=60
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=multi-user.target
+Alias=ultimate-agent-qwen.service
