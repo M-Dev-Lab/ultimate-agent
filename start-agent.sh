@@ -312,6 +312,62 @@ start_telegram() {
     npx tsx src/telegram.ts
 }
 
+start_python_agent() {
+    print_header
+    print_section "🐍 Starting Python Agent..."
+    
+    cd "$SCRIPT_DIR/python-agent"
+    mkdir -p data workspaces outputs logs memory
+    
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  🐍 Python Agent v3.0 - Starting...                         ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    # Check if virtual environment exists
+    if [ ! -d "venv" ]; then
+        print_error "Virtual environment not found!"
+        echo "💡 Create it with: cd python-agent && python3 -m venv venv"
+        exit 1
+    fi
+    
+    # Activate venv and start agent
+    source venv/bin/activate
+    
+    # Check if .env exists
+    if [ ! -f ".env" ]; then
+        print_warning ".env not found, creating from example..."
+        if [ -f ".env.example" ]; then
+            cp .env.example .env
+        fi
+    fi
+    
+    echo "📊 Python Agent Configuration:"
+    echo "   API Host:    127.0.0.1:8000"
+    echo "   Database:    SQLite (./data/agent.db)"
+    echo "   Cache:       Redis (localhost:6379)"
+    echo "   Workers:     1 (local development)"
+    echo ""
+    echo "🧪 Running tests first..."
+    echo ""
+    
+    # Run tests to verify setup
+    python3 -m pytest tests/test_local_env.py -v --tb=short 2>&1 | tail -20
+    
+    if [ $? -ne 0 ]; then
+        print_warning "Some tests failed, but continuing..."
+    fi
+    
+    echo ""
+    print_section "Starting API Server..."
+    echo "🌐 API:      http://localhost:8000"
+    echo "📚 Docs:     http://localhost:8000/docs"
+    echo "🔍 ReDoc:    http://localhost:8000/redoc"
+    echo ""
+    
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+}
+
 stop_server() {
     print_header
     echo "🛑 Stopping Ultimate Agent..."
@@ -320,9 +376,11 @@ stop_server() {
     pkill -f "node.*server" 2>/dev/null || true
     pkill -f "tsx src/telegram" 2>/dev/null || true
     pkill -f "npm start" 2>/dev/null || true
+    pkill -f "uvicorn" 2>/dev/null || true
+    pkill -f "python.*agent" 2>/dev/null || true
     sleep 2
     
-    for port in 3000 5173 3001; do
+    for port in 3000 5173 3001 8000; do
         local PORT_PID
         PORT_PID=$(get_port_pid $port)
         if [ -n "$PORT_PID" ]; then
@@ -574,12 +632,13 @@ show_help() {
     echo "  start       Start dashboard + Telegram bot (default)"
     echo "  dashboard   Start dashboard only (no Telegram)"
     echo "  telegram    Start Telegram bot only (no dashboard)"
+    echo "  python      Start Python Agent (FastAPI) for testing"
     echo "  stop        Stop all running servers"
     echo "  restart     Restart all servers"
     echo "  status      Show system status"
     echo "  logs        Show recent logs"
     echo "  test        Run system tests"
-    echo "  tests       Run menu system tests (NEW!)"
+    echo "  tests       Run menu system tests"
     echo "  models      List available Ollama models"
     echo "  pull <model> Pull a new Ollama model"
     echo "  install     Install npm dependencies"
@@ -621,6 +680,9 @@ case "$COMMAND" in
         ;;
     telegram)
         start_telegram
+        ;;
+    python)
+        start_python_agent
         ;;
     stop)
         stop_server
