@@ -44,9 +44,9 @@ interface AgentResponse {
 
 // Welcome message function
 function getWelcomeMessage(): string {
-  return `🦞 *Ultimate Coding Agent v3.0* online!
+  return `� *Ultimate Coding Agent v3.0* online!
 
-I'm your proactive AI coding assistant with OpenClaw memory, 700+ skills, and intelligent model routing.
+I'm your proactive AI coding assistant with advanced memory, comprehensive skills, and intelligent model routing.
 
 *Quick Start:*
 Tap a button below or send a command.
@@ -394,7 +394,7 @@ Running comprehensive security scan...
       await ctx.reply(`💡 *Skills Manager*
 
 *Installed Skills:* 12
-*Available (700+):* ClawdHub Registry
+*Available:* Comprehensive Skills Library
 
 *Top Skills:*
 • react-component-builder

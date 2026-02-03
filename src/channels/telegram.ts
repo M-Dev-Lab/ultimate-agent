@@ -119,9 +119,9 @@ export class TelegramChannel extends EventEmitter {
     this.bot.start((ctx) => {
       // Send initial welcome message
       ctx.reply(
-        `🦞 *Ultimate Coding Agent v3.0* online!
+        `� *Ultimate Coding Agent v3.0* online!
  
- I'm your proactive AI coding assistant with OpenClaw memory, 700+ skills, and intelligent model routing.
+ I'm your proactive AI coding assistant with advanced memory, comprehensive skills, and intelligent model routing.
  
  *Quick Start:*
  Tap a button below or send a command.
@@ -424,7 +424,7 @@ Running comprehensive security scan...
       ctx.reply(`💡 *Skills Manager*
 
 *Installed Skills:* 12
-*Available (700+):* ClawdHub Registry
+*Available:* Comprehensive Skills Library
 
 *Top Skills:*
 • react-component-builder
@@ -921,7 +921,7 @@ What would you like to deploy?`,
     });
 
     this.bot.command('skills', async (ctx) => {
-      ctx.reply(`💡 *Skills Manager*\n\n*Installed:* 12 skills\n*Available:* 700+ in ClawdHub\n\n*Commands:*
+      ctx.reply(`💡 *Skills Manager*\n\n*Installed:* 12 skills\n*Available:* Comprehensive Skills Library\n\n*Commands:*
 • /skills list - View installed
 • /skills search <query> - Find skills
 • /skills install <name> - Add skill`,
