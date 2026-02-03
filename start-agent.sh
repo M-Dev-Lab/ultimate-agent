@@ -14,8 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 print_header() {
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  � Ultimate Coding Agent v3.0 - Production Ready           ║${NC}"
-    echo -e "${MAGENTA}║  Advanced Memory • Comprehensive Skills • Proactive Automation ║${NC}"
+    echo -e "${MAGENTA}║  🐍 Ultimate Python Agent v4.0 - Qwen3-coder Cloud       ║${NC}"
+    echo -e "${MAGENTA}║  LangGraph • FastAPI • SQLAlchemy • Ollama Cloud            ║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -393,11 +393,11 @@ stop_server() {
 
 restart_server() {
     print_header
-    echo "🔄 Restarting Ultimate Agent..."
+    echo "🔄 Restarting Python Agent..."
     echo ""
     stop_server
     sleep 2
-    start_server
+    start_python_agent
 }
 
 show_status() {
@@ -649,11 +649,12 @@ show_help() {
     echo "  USE_CLOUD_FIRST=false  Disable cloud model priority"
     echo ""
     echo -e "${CYAN}Examples:${NC}"
-    echo "  $0 start              # Start everything"
-    echo "  $0 dashboard          # Dashboard only"
-    echo "  $0 telegram           # Telegram only"
+    echo "  $0 start              # Start Python Agent with Qwen3-coder"
+    echo "  $0 node               # Start Node.js Dashboard (legacy)"
+    echo "  $0 telegram           # Telegram bot only"
+    echo "  $0 dashboard          # Dashboard only (Node.js)"
     echo "  $0 tests              # Run menu system tests"
-    echo "  $0 pull llama3.2      # Pull Llama model"
+    echo "  $0 pull qwen3-coder   # Pull Qwen model"
     echo "  $0 test               # Run diagnostics"
     echo ""
     echo -e "${CYAN}Key Features (v3.0 Enhanced):${NC}"
@@ -673,7 +674,7 @@ COMMAND=${1:-start}
 
 case "$COMMAND" in
     start)
-        start_server
+        start_python_agent
         ;;
     dashboard)
         start_dashboard
@@ -681,8 +682,8 @@ case "$COMMAND" in
     telegram)
         start_telegram
         ;;
-    python)
-        start_python_agent
+    node|legacy)
+        start_server
         ;;
     stop)
         stop_server
