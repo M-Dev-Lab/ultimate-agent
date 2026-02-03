@@ -36,7 +36,7 @@ class OllamaClient:
         model: Optional[str] = None,
         **kwargs
     ) -> str:
-        """Generate text using Ollama"""
+        """Generate text using Ollama (uses chat endpoint for cloud compatibility)"""
         model_to_use = model or self.ollama_model
         
         try:
@@ -46,16 +46,18 @@ class OllamaClient:
                 if self.is_cloud and self.ollama_api_key:
                     headers["Authorization"] = f"Bearer {self.ollama_api_key.get_secret_value()}"
                 
+                # Use chat endpoint for both cloud and local (more consistent)
+                messages = [{"role": "user", "content": prompt}]
                 request_data = {
                     "model": model_to_use,
-                    "prompt": prompt,
+                    "messages": messages,
                     "stream": False,
                     **kwargs
                 }
                 
                 # Send request
                 response = await client.post(
-                    f"{self.ollama_host}/api/generate",
+                    f"{self.ollama_host}/api/chat",
                     json=request_data,
                     headers=headers
                 )
@@ -63,14 +65,15 @@ class OllamaClient:
                 response.raise_for_status()
                 result = response.json()
                 
+                content = result.get("message", {}).get("content", "")
                 logger.info(
                     "Generated text",
                     model=model_to_use,
                     prompt_length=len(prompt),
-                    response_length=len(result.get("response", ""))
+                    response_length=len(content)
                 )
                 
-                return result.get("response", "")
+                return content
         
         except Exception as e:
             logger.error(f"Ollama generation failed: {e}")

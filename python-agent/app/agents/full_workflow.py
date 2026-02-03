@@ -10,10 +10,8 @@ from typing import Dict, Any, List, Optional, TypedDict, Annotated
 from datetime import datetime
 import uuid
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor, ToolInvocation
 from langchain_core.tools import Tool, StructuredTool
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain.callbacks import AsyncCallbackManager
 from pydantic import BaseModel, Field
 import structlog
 
@@ -404,7 +402,6 @@ class AgentWorkflow:
     
     def __init__(self):
         self.tool_registry = ToolRegistry()
-        self.tool_executor = ToolExecutor(self.tool_registry.tools_list)
         self.graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
