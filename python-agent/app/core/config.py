@@ -5,24 +5,31 @@ Centralized settings with security best practices
 
 from typing import Optional, List
 from pydantic_settings import BaseSettings
-from pydantic import SecretStr, Field, validator
+from pydantic import SecretStr, Field, field_validator, ConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings with automatic environment variable loading"""
+    
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"  # Ignore extra fields from .env file
+    )
 
     # ==================== API Configuration ====================
-    app_name: str = "Ultimate Coding Agent v3.0"
+    app_name: str = "Ultimate Coding Agent"
     app_version: str = "3.0.0"
     debug: bool = False
     environment: str = Field(default="development", pattern="^(development|staging|production)$")
 
     # ==================== Server Configuration ====================
-    api_host: str = "0.0.0.0"
+    api_host: str = "127.0.0.1"
     api_port: int = 8000
-    api_workers: int = 4
+    api_workers: int = 1
     request_timeout: int = 30
-    max_concurrent_tasks: int = 5
+    max_concurrent_tasks: int = 3
 
     # ==================== Security Configuration ====================
     jwt_secret: SecretStr = Field(..., description="Secret key for JWT encoding")
@@ -54,14 +61,11 @@ class Settings(BaseSettings):
     redis_cache_ttl: int = 3600
     session_expiration_hours: int = 24
 
-    # ==================== Ollama Configuration ====================
-    ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5-coder:7b"
-    ollama_timeout: int = 120
-    
-    # Embedding Model
-    embedding_model: str = "nomic-embed-text"
-    embedding_dimension: int = 768
+    # ==================== Ollama Configuration (Local via SSH tunnel) ====================
+    ollama_host: str = Field(default="http://localhost:11434")
+    ollama_model: str = Field(default="qwen2.5-coder:480b")
+    ollama_api_key: Optional[SecretStr] = Field(default=None, description="Optional API key for Ollama Cloud")
+    ollama_timeout: int = 300
 
     # ==================== Telegram Bot Configuration ====================
     telegram_bot_token: SecretStr = Field(default="")
@@ -106,19 +110,16 @@ class Settings(BaseSettings):
     enable_monitoring: bool = True
     enable_rate_limiting: bool = True
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-
-    @validator("jwt_secret")
+    @field_validator("jwt_secret")
+    @classmethod
     def validate_jwt_secret(cls, v):
         """Ensure JWT secret is strong enough"""
         if len(v.get_secret_value()) < 32:
             raise ValueError("JWT secret must be at least 32 characters long")
         return v
 
-    @validator("database_url")
+    @field_validator("database_url")
+    @classmethod
     def validate_db_url(cls, v):
         """Validate database URL format"""
         url = v.get_secret_value()

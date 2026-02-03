@@ -16,6 +16,7 @@ import structlog
 
 from app.core.config import settings
 from app.models.schemas import ErrorResponse
+from app.api import build_router, analysis_router, health_router, websocket_router
 
 # Configure structured logging
 structlog.configure(
@@ -205,6 +206,10 @@ async def root():
 
 
 # ==================== Ready for Route Imports ====================
-# Routes will be registered here after module import
+# Register API routes
+app.include_router(build_router)
+app.include_router(analysis_router)
+app.include_router(health_router)
+app.include_router(websocket_router)
 
 logger.info("FastAPI application initialized", app=settings.app_name, version=settings.app_version)
