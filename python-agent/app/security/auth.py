@@ -168,3 +168,7 @@ class RBAC:
     def has_permission(permissions: list, required_permission: str) -> bool:
         """Check if user has required permission"""
         return required_permission in permissions
+
+
+# Export verify_token for convenience
+verify_token = TokenManager.verify_token

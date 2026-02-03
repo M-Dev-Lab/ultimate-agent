@@ -100,10 +100,12 @@ class TestConfiguration:
     
     def test_ollama_host(self):
         from app.core.config import settings
-        # Should be localhost for local setup
-        assert "localhost" in settings.ollama_host.lower() or \
-               "127.0.0.1" in settings.ollama_host.lower()
+        # Support both local (localhost/127.0.0.1) and cloud (api.ollama.com) endpoints
+        assert ("localhost" in settings.ollama_host.lower() or 
+               "127.0.0.1" in settings.ollama_host.lower() or
+               "ollama" in settings.ollama_host.lower())
         print(f"✓ Ollama host: {settings.ollama_host}")
+        print(f"  Mode: {'Cloud' if 'ollama.com' in settings.ollama_host else 'Local'}")
 
 
 class TestSecurityHardening:

@@ -3,24 +3,25 @@ Pydantic models for API request/response validation
 Provides automatic input sanitization and type checking
 """
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator, constr
+from typing import Optional, List, Dict, Any, Annotated
+from pydantic import BaseModel, Field, field_validator, StringConstraints
 from datetime import datetime
 
 
 # ==================== Authentication Models ====================
 
 class LoginRequest(BaseModel):
-    username: constr(min_length=1, max_length=50)
-    password: constr(min_length=8, max_length=128)
+    username: Annotated[str, StringConstraints(min_length=1, max_length=50)]
+    password: Annotated[str, StringConstraints(min_length=8, max_length=128)]
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "username": "admin",
                 "password": "secure_password_123"
             }
         }
+    }
 
 
 class LoginResponse(BaseModel):
@@ -31,12 +32,13 @@ class LoginResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: constr(min_length=1, max_length=50, regex=r'^[a-zA-Z0-9_-]+$')
+    username: Annotated[str, StringConstraints(min_length=1, max_length=50, pattern=r'^[a-zA-Z0-9_-]+$')]
     email: str
-    password: constr(min_length=8, max_length=128)
+    password: Annotated[str, StringConstraints(min_length=8, max_length=128)]
     role: str = "user"
 
-    @validator('role')
+    @field_validator('role')
+    @classmethod
     def validate_role(cls, v):
         if v not in ['admin', 'user', 'viewer']:
             raise ValueError('Invalid role')
@@ -50,21 +52,20 @@ class UserResponse(BaseModel):
     role: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 # ==================== Build/Code Generation Models ====================
 
 class BuildRequest(BaseModel):
     """Request model for project build"""
-    goal: constr(min_length=5, max_length=2000)
-    stack: Optional[constr(max_length=100)] = None
-    name: Optional[constr(regex=r'^[a-zA-Z0-9_-]+$', max_length=50)] = None
+    goal: Annotated[str, StringConstraints(min_length=5, max_length=2000)]
+    stack: Optional[Annotated[str, StringConstraints(max_length=100)]] = None
+    name: Optional[Annotated[str, StringConstraints(pattern=r'^[a-zA-Z0-9_-]+$', max_length=50)]] = None
     auto_fix: bool = False
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "goal": "Create a REST API for user management with PostgreSQL",
                 "stack": "python/fastapi",
@@ -72,6 +73,7 @@ class BuildRequest(BaseModel):
                 "auto_fix": True
             }
         }
+    }
 
 
 class BuildResponse(BaseModel):
@@ -82,8 +84,8 @@ class BuildResponse(BaseModel):
     created_at: datetime
     workspace_path: str
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "task_id": "build_12345",
                 "status": "queued",
@@ -92,6 +94,7 @@ class BuildResponse(BaseModel):
                 "workspace_path": "/data/workspaces/user123/build_12345"
             }
         }
+    }
 
 
 class BuildStatus(BaseModel):
@@ -109,9 +112,9 @@ class BuildStatus(BaseModel):
 
 class CodeAnalysisRequest(BaseModel):
     """Request for code analysis"""
-    code: constr(min_length=10, max_length=50000)
-    language: constr(regex=r'^(python|javascript|typescript|java|go|rust)$')
-    analysis_type: constr(regex=r'^(security|performance|style|complexity)$')
+    code: Annotated[str, StringConstraints(min_length=10, max_length=50000)]
+    language: Annotated[str, StringConstraints(pattern=r'^(python|javascript|typescript|java|go|rust)$')]
+    analysis_type: Annotated[str, StringConstraints(pattern=r'^(security|performance|style|complexity)$')]
 
 
 class CodeIssue(BaseModel):
@@ -135,7 +138,7 @@ class CodeAnalysisResponse(BaseModel):
 
 class MemoryEntry(BaseModel):
     """Memory entry for persistent learning"""
-    content: constr(min_length=1, max_length=5000)
+    content: Annotated[str, StringConstraints(min_length=1, max_length=5000)]
     tags: List[str] = []
     metadata: Optional[Dict[str, Any]] = None
     importance: int = Field(default=5, ge=1, le=10)
@@ -143,7 +146,7 @@ class MemoryEntry(BaseModel):
 
 class MemorySearchRequest(BaseModel):
     """Request to search memory"""
-    query: constr(min_length=1, max_length=500)
+    query: Annotated[str, StringConstraints(min_length=1, max_length=500)]
     limit: int = Field(default=5, ge=1, le=20)
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
@@ -205,8 +208,8 @@ class ErrorResponse(BaseModel):
     status_code: int
     timestamp: datetime
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "error": "validation_error",
                 "detail": "Project name must contain only alphanumeric characters",
@@ -214,6 +217,7 @@ class ErrorResponse(BaseModel):
                 "timestamp": "2024-02-03T10:00:00Z"
             }
         }
+    }
 
 
 # ==================== Skills/Tools Models ====================
@@ -241,3 +245,35 @@ class SkillExecutionResponse(BaseModel):
     result: Any
     execution_time: float
     error: Optional[str] = None
+
+
+# ==================== Build Status Models ====================
+
+class BuildStatus(BaseModel):
+    """Status of a build task"""
+    task_id: str
+    status: str  # "pending", "running", "completed", "failed"
+    progress: int = Field(default=0, ge=0, le=100)
+    output: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BuildStatusResponse(BaseModel):
+    """Response for build status query"""
+    task_id: str
+    status: str
+    progress: int
+    output: Optional[str] = None
+    error: Optional[str] = None
+    timestamp: datetime
+
+
+class BuildHistoryResponse(BaseModel):
+    """Build history entry"""
+    task_id: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    result: Optional[Dict[str, Any]] = None

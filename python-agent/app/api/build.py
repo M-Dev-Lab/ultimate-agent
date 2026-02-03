@@ -29,7 +29,9 @@ from app.models.schemas import (
     BuildHistoryResponse,
     ErrorResponse,
 )
-from app.security.auth import get_current_user, User
+from app.security.auth import get_current_user
+from typing import Dict, Any
+User = Dict[str, Any]
 from app.security.validators import SecurityValidator
 from app.services.command_executor import SecureCommandExecutor
 from app.core.config import Settings, get_settings
