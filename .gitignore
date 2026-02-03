@@ -1,0 +1,96 @@
+# ============================================
+# Node.js & Dependencies
+# ============================================
+node_modules/
+dist/
+build/
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================
+# Environment & Secrets
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.production.local
+
+# ============================================
+# Authentication & Credentials
+# ============================================
+auth/
+creds.json
+device-list-*.json
+lid-mapping-*.json
+session-*.json
+app-state-sync-*.json
+pre-key-*.json
+tctoken-*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ============================================
+# Database & Data
+# ============================================
+data/db/
+*.db
+*.sqlite
+*.sqlite3
+learning-data.json
+
+# ============================================
+# Logs & Temporary Files
+# ============================================
+logs/
+*.log
+*.log.*
+agent-startup.log
+dashboard.log
+server.log
+telegram.log
+qwen.log
+
+# ============================================
+# OS & IDE
+# ============================================
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*.swo
+*~
+.vscode/settings.json
+.idea/
+*.iml
+
+# ============================================
+# Runtime & Build Outputs
+# ============================================
+outputs/
+memory/
+.cache/
+*.pid
+
+# ============================================
+# System Files
+# ============================================
+Thumbs.db
+.directory
+
+# ============================================
+# Private/Local Development
+# ============================================
+workspace/
+.local/
+temp/
+tmp/
+
+# ============================================
+# Test Coverage
+# ============================================
+coverage/
+.nyc_output/
