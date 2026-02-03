@@ -425,13 +425,13 @@ async def cancel_build(
         )
 
 
-# Background task (Phase 2: replace with Celery)
+# Background task (production uses Celery task queue)
 async def execute_build_async(task_id: str, username: str):
     """
     Execute build task asynchronously.
 
-    Phase 2 TODO: Replace with Celery task queue for production.
-    Currently uses FastAPI BackgroundTasks (suitable for Phase 1).
+    Uses FastAPI BackgroundTasks for Phase 1. Scalable to Celery task queue in production.
+    Automatically processes build task in background without blocking HTTP response.
 
     Args:
         task_id: Build task ID

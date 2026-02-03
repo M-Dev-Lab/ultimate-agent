@@ -141,9 +141,10 @@ class TestDatabaseSetup:
     
     def test_database_connection(self):
         from app.db.session import engine
+        from sqlalchemy import text
         try:
             with engine.connect() as connection:
-                result = connection.execute("SELECT 1")
+                result = connection.execute(text("SELECT 1"))
                 assert result.scalar() == 1
             print("✓ Database connection successful")
         except Exception as e:

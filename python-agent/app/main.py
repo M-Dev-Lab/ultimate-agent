@@ -17,6 +17,7 @@ import structlog
 from app.core.config import settings
 from app.models.schemas import ErrorResponse
 from app.api import build_router, analysis_router, health_router, websocket_router
+from app.db.session import init_db, close_db
 
 # Configure structured logging
 structlog.configure(
@@ -213,3 +214,28 @@ app.include_router(health_router)
 app.include_router(websocket_router)
 
 logger.info("FastAPI application initialized", app=settings.app_name, version=settings.app_version)
+
+
+# ==================== Startup and Shutdown Events ====================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and prepare application on startup"""
+    logger.info("Starting application", app=settings.app_name)
+    try:
+        await init_db()
+        logger.info("Database initialization successful")
+    except Exception as e:
+        logger.error("Database initialization failed", error=str(e))
+        raise
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on application shutdown"""
+    logger.info("Shutting down application")
+    try:
+        await close_db()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error("Error during shutdown", error=str(e))

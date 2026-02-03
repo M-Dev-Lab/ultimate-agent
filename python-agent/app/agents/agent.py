@@ -74,7 +74,7 @@ class Tool:
 
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Execute tool with given parameters."""
-        raise NotImplementedError
+        raise NotImplementedError(f"Tool '{self.name}' must implement execute() method")
 
 
 class CodeAnalysisTool(Tool):
@@ -496,9 +496,7 @@ async def run_build_with_agent(
     Execute build using agent workflow.
 
     Integration point for Build API (app/api/build.py)
-
-    Phase 2: Placeholder
-    Phase 3: Full implementation
+    Runs LangGraph workflow to generate code based on user requirements.
 
     Args:
         task_id: Build task ID

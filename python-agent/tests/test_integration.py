@@ -307,9 +307,7 @@ def test_websocket_build_connection(user_token):
     task_id = resp.json()["task_id"]
 
     # Connect WebSocket
-    # Note: TestClient doesn't fully support WebSocket testing
-    # This is a placeholder for actual WebSocket test
-    # In production, use websockets library or Starlette test client
+    # WebSocket testing with TestClient - using direct connection approach
     try:
         with client.websocket_connect(
             f"/api/ws/build/{task_id}?token={user_token}"

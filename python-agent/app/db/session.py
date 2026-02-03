@@ -22,10 +22,14 @@ def get_database_url() -> str:
 engine_kwargs = {
     "echo": settings.db_echo,
     "pool_pre_ping": True,  # Test connections before using
-    "connect_args": {
+}
+
+# Only set connect_args for non-SQLite databases
+db_url = get_database_url()
+if "sqlite" not in db_url:
+    engine_kwargs["connect_args"] = {
         "connect_timeout": 10,
     }
-}
 
 # Use different pool strategies based on environment
 if settings.environment == "production":
@@ -36,7 +40,7 @@ else:
     engine_kwargs["poolclass"] = NullPool  # Create new connection for each request in dev
 
 engine = create_engine(
-    get_database_url(),
+    db_url,
     **engine_kwargs
 )
 
