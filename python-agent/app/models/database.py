@@ -6,8 +6,7 @@ Provides ORM layer for PostgreSQL persistence with audit trails
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, ForeignKey, Text, Enum, Index
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 import enum
 
 Base = declarative_base()

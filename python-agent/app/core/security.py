@@ -2,7 +2,7 @@
 Security utilities for authentication, token generation, and password hashing.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -88,22 +88,23 @@ def create_access_token(
     to_encode = data.copy()
     
     # Set expiration time
+    now_utc = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now_utc + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(hours=settings.jwt_expiration_hours)
+        expire = now_utc + timedelta(hours=settings.jwt_expiration_hours)
     
     # Add standard JWT claims
     to_encode.update({
         "exp": expire,
-        "iat": datetime.utcnow()
+        "iat": now_utc
     })
     
     # Encode the token
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     
     # Calculate expires_in in seconds
-    expires_in = int((expire - datetime.utcnow()).total_seconds())
+    expires_in = int((expire - now_utc).total_seconds())
     
     return Token(
         access_token=encoded_jwt,
