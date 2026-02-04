@@ -1,75 +1,196 @@
 """
 Telegram bot integration for Ultimate Coding Agent
-Provides chat interface and command handling via Telegram
+Interactive bot with skills, filesystem, and social media capabilities
 """
 
 import logging
 from typing import Optional, Dict, Any, List
-import asyncio
 from datetime import datetime
-import uuid
-from sqlalchemy.orm import Session
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, ApplicationBuilder
+from telegram.request import HTTPXRequest
 import structlog
 
 from app.core.config import settings
 from app.models.database import User, TelegramUser, Build, BuildStatus
 from app.db.session import SessionLocal
+from app.skills.registry import get_skill_registry
 from app.agents.full_workflow import get_agent_workflow
+from app.integrations.ollama import get_ollama_client
+from app.integrations.file_manager import get_file_manager
+from app.integrations.browser_controller import get_browser_controller
+from app.integrations.agent_handler import get_agent_handler
 
 logger = structlog.get_logger(__name__)
 
 
 class TelegramBotManager:
-    """Manages Telegram bot interactions and command processing"""
+    """Telegram bot with full capabilities"""
+    
+    # NEW 7-Button Main Menu (as per plan)
+    MAIN_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🏗️ Project"), KeyboardButton("📱 Social")],
+            [KeyboardButton("📅 Schedule"), KeyboardButton("🔄 Restart Agent")],
+            [KeyboardButton("⚡ Shutdown"), KeyboardButton("❓ Help")],
+            [KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Skill categories
+    SKILL_CATEGORIES = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("💻 Code"), KeyboardButton("🔍 Analysis")],
+            [KeyboardButton("🛠️ DevOps"), KeyboardButton("📝 Docs")],
+            [KeyboardButton("🧪 Testing"), KeyboardButton("📱 Social")],
+            [KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Code skills
+    CODE_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🐍 Python API"), KeyboardButton("🟢 Node.js API")],
+            [KeyboardButton("⚛️ React Component"), KeyboardButton("🔵 TypeScript")],
+            [KeyboardButton("⬅️ Skills")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Analysis skills
+    ANALYSIS_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🔒 Security Audit"), KeyboardButton("⚡ Performance")],
+            [KeyboardButton("🐛 Bug Finding"), KeyboardButton("📊 Code Review")],
+            [KeyboardButton("⬅️ Skills")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # DevOps skills
+    DEVOPS_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🐳 Docker"), KeyboardButton("🔄 CI/CD")],
+            [KeyboardButton("☸️ Kubernetes"), KeyboardButton("📦 Deployment")],
+            [KeyboardButton("⬅️ Skills")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Social posting
+    SOCIAL_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🐦 Tweet"), KeyboardButton("📘 LinkedIn")],
+            [KeyboardButton("📕 Facebook"), KeyboardButton("📷 Instagram")],
+            [KeyboardButton("🤖 Reddit"), KeyboardButton("📝 Medium")],
+            [KeyboardButton("📢 Announcement"), KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # File operations
+    FILE_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📄 Create File"), KeyboardButton("📖 Read File")],
+            [KeyboardButton("✏️ Edit File"), KeyboardButton("🗑️ Delete File")],
+            [KeyboardButton("📁 New Folder"), KeyboardButton("📂 List Folder")],
+            [KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Browser operations
+    BROWSER_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🌐 Open URL"), KeyboardButton("📸 Screenshot")],
+            [KeyboardButton("🌐 Check Browsers"), KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Project creation menu
+    PROJECT_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🐍 Python"), KeyboardButton("🟢 JavaScript")],
+            [KeyboardButton("🔵 TypeScript"), KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Schedule menu
+    SCHEDULE_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📋 List Tasks"), KeyboardButton("➕ New Task")],
+            [KeyboardButton("🗑️ Delete Task"), KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Help menu
+    HELP_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📖 Commands"), KeyboardButton("💡 Tips")],
+            [KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
+    
+    # Analysis menu
+    ANALYSIS_KEYBOARD = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🔒 Security Audit"), KeyboardButton("⚡ Performance")],
+            [KeyboardButton("🐛 Bug Finding"), KeyboardButton("📊 Code Review")],
+            [KeyboardButton("⬅️ Back")],
+        ],
+        resize_keyboard=True,
+    )
     
     def __init__(self):
-        """Initialize Telegram bot"""
-        if not settings.telegram_bot_token:
-            logger.warning("Telegram bot token not configured")
-            return
-        
-        self.token = settings.telegram_bot_token.get_secret_value()
+        self.token = None
         self.application = None
-        self.db = None
+        self.user_sessions: Dict[int, Dict[str, Any]] = {}
+        
+        if settings.telegram_bot_token:
+            self.token = settings.telegram_bot_token.get_secret_value()
+        else:
+            logger.warning("Telegram bot token not configured")
     
     async def initialize(self):
-        """Initialize bot application and handlers"""
+        """Initialize bot"""
         if not self.token:
-            logger.warning("Telegram bot disabled: no token configured")
+            logger.warning("Telegram bot disabled")
             return
         
         try:
-            self.application = Application.builder().token(self.token).build()
-            
-            # Register handlers
+            request = HTTPXRequest(connection_pool_size=8)
+            self.application = (
+                ApplicationBuilder()
+                .token(self.token)
+                .request(request)
+                .build()
+            )
             self._register_handlers()
-            
+            await self.application.initialize()
             logger.info("Telegram bot initialized")
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
             raise
     
     def _register_handlers(self):
-        """Register command and message handlers"""
-        # Command handlers
+        """Register command handlers"""
         self.application.add_handler(CommandHandler("start", self.handle_start))
         self.application.add_handler(CommandHandler("help", self.handle_help))
-        self.application.add_handler(CommandHandler("build", self.handle_build_command))
-        self.application.add_handler(CommandHandler("status", self.handle_status_command))
-        self.application.add_handler(CommandHandler("history", self.handle_history_command))
-        self.application.add_handler(CommandHandler("link", self.handle_link_command))
-        self.application.add_handler(CommandHandler("admin", self.handle_admin_command))
-        
-        # Message handler
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        
-        # Callback handler
-        self.application.add_handler(CallbackQueryHandler(self.handle_button_click))
-        
-        # Error handler
-        self.application.add_error_handler(self.error_handler)
+        self.application.add_handler(CommandHandler("build", self.handle_build))
+        self.application.add_handler(CommandHandler("skill", self.handle_skill))
+        self.application.add_handler(CommandHandler("status", self.handle_status))
+        self.application.add_handler(CommandHandler("health", self.handle_health))
+        self.application.add_handler(CommandHandler("file", self.handle_file))
+        self.application.add_handler(CommandHandler("post", self.handle_post))
+        self.application.add_handler(CommandHandler("open", self.handle_open_url))
+        self.application.add_handler(CommandHandler("link", self.handle_link))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
     
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -79,189 +200,248 @@ class TelegramBotManager:
             
             await self._ensure_user_linked(user.id, user.username, chat_id)
             
-            welcome_text = f"""
-Welcome to Ultimate Coding Agent 🚀
+            ollama = get_ollama_client()
+            health = await ollama.health_check()
+            mode = "☁️ Cloud" if health.get("primary") == "cloud" else "📱 Local"
+            
+            welcome = f"""
+🤖 <b>Welcome to Ultimate Coding Agent!</b>
 
-I can help you generate code, analyze projects, and automate development tasks!
+🤖 AI Mode: {mode}
 
-Available commands:
-• /build - Start a new build task
-• /status - Check build status
-• /history - View your builds
-• /help - Show detailed help
-• /link - Link your account
-• /admin - Admin controls (if authorized)
+<b>Available Features:</b>
+🏗️ <b>New Project</b> - Generate complete projects
+💡 <b>Use Skill</b> - Execute specialized skills
+📁 <b>Files</b> - Create, edit, delete files
+🌐 <b>Browser</b> - Control browser
+📱 <b>Social</b> - Post to social media
+📊 <b>My Builds</b> - View your builds
 
-What would you like to do today?
+<i>Select an option below!</i>
 """
             
-            await update.message.reply_text(welcome_text)
-            logger.info("Start command", user_id=user.id, chat_id=chat_id)
+            await update.message.reply_text(welcome, reply_markup=self.MAIN_KEYBOARD, parse_mode="HTML")
+            logger.info("User started bot", user_id=user.id)
+            
         except Exception as e:
-            logger.error(f"Start command failed: {e}")
-            await update.message.reply_text("❌ Error processing command")
+            logger.error(f"Start failed: {e}")
     
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
         help_text = """
-📚 **Command Reference:**
+📚 <b>Help - Ultimate Coding Agent</b>
 
-*Build Commands:*
-• `/build <project_name>` - Start a new build
-  Example: `/build my_api`
+<b>Commands:</b>
+/start - Start the bot
+/help - Show this help
+/build [name] [desc] - Create project
+/skill [name] - Execute a skill
+/file [operation] [path] - File operations
+/post [platform] [text] - Social posting
+/open [url] - Open URL in browser
+/status - System status
+/health - Check AI connection
 
-*Status Commands:*
-• `/status [build_id]` - Check build status
-  Example: `/status abc123`
+<b>Buttons:</b>
+🏗️ New Project - Generate projects
+💡 Use Skill - Open skill menu
+📁 Files - File operations
+🌐 Browser - Browser control
+📱 Social - Social media posting
 
-*History:*
-• `/history` - Show recent builds
-
-*Account:*
-• `/link` - Link your Telegram to your account
-• `/admin` - Admin operations
-
-*Additional Features:*
-• Send code snippets directly for analysis
-• Ask questions about your projects
-• Get recommendations for improvements
-
-Need more help? Visit the documentation or contact support.
+<b>Examples:</b>
+/build my_api A REST API
+/file create test.py "content"
+/post twitter Hello world!
+/open https://google.com
 """
         
-        await update.message.reply_text(help_text, parse_mode="Markdown")
-        logger.info("Help command", user_id=update.effective_user.id)
+        await update.message.reply_text(help_text, reply_markup=self.MAIN_KEYBOARD, parse_mode="HTML")
     
-    async def handle_build_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_build(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /build command"""
         try:
             user = update.effective_user
-            chat_id = update.effective_chat.id
+            args = context.args
             
-            # Check if user is linked
+            if not args:
+                await update.message.reply_text(
+                    "📦 <b>Create New Project</b>\n\nUsage: /build [name] [description]\n\nExample: /build my_api A REST API",
+                    reply_markup=self.MAIN_KEYBOARD,
+                    parse_mode="HTML"
+                )
+                return
+            
+            project_name = args[0]
+            description = " ".join(args[1:]) if len(args) > 1 else project_name
+            
             db = SessionLocal()
             tg_user = db.query(TelegramUser).filter_by(telegram_id=user.id).first()
             
             if not tg_user:
-                await update.message.reply_text(
-                    "❌ Please link your account first using /link command"
-                )
+                db.close()
+                await update.message.reply_text("❌ Please link your account first!", reply_markup=self.MAIN_KEYBOARD)
                 return
             
-            # Get project name from args
-            if not context.args:
-                await update.message.reply_text(
-                    "📝 Please provide a project name: `/build my_project`",
-                    parse_mode="Markdown"
-                )
-                return
-            
-            project_name = " ".join(context.args)
-            
-            # Show interactive build setup
-            keyboard = [
-                [
-                    InlineKeyboardButton("🐍 Python", callback_data=f"build_py_{project_name}"),
-                    InlineKeyboardButton("🟢 Node.js", callback_data=f"build_js_{project_name}")
-                ],
-                [
-                    InlineKeyboardButton("❌ Cancel", callback_data="cancel")
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            build = Build(
+                project_name=project_name,
+                language="python",
+                status=BuildStatus.PENDING,
+                user_id=tg_user.user_id,
+            )
+            db.add(build)
+            db.commit()
+            db.close()
             
             await update.message.reply_text(
-                f"Select language for {project_name}:",
-                reply_markup=reply_markup
+                f"🚀 <b>Building {project_name}</b>...\n\n⏳ Generating with Qwen3-coder...",
+                parse_mode="HTML"
             )
             
-            logger.info("Build command", user_id=user.id, project=project_name)
+            workflow = get_agent_workflow()
+            result = await workflow.execute({
+                "user_id": tg_user.user_id,
+                "build_id": build.id,
+                "project_name": project_name,
+                "requirements": description,
+            })
+            
+            if result.get("status") == "completed":
+                code_preview = (result.get("generated_code", "") or "")[:300]
+                await update.message.reply_text(
+                    f"✅ <b>Build Complete!</b>\n\n📦 {project_name}\n🆔 <code>{build.id[:8]}</code>\n\n<code>{code_preview}...</code>",
+                    reply_markup=self.MAIN_KEYBOARD,
+                    parse_mode="HTML",
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Build failed: {result.get('error', 'Unknown')}",
+                    reply_markup=self.MAIN_KEYBOARD
+                )
+            
         except Exception as e:
-            logger.error(f"Build command failed: {e}")
-            await update.message.reply_text("❌ Error processing build command")
+            logger.error(f"Build failed: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
     
-    async def handle_status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_skill(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /skill command"""
+        await update.message.reply_text(
+            "💡 <b>Select a Skill Category:</b>",
+            reply_markup=self.SKILL_CATEGORIES,
+            parse_mode="HTML"
+        )
+    
+    async def handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command"""
         try:
-            db = SessionLocal()
-            user = update.effective_user
+            ollama = get_ollama_client()
+            health = await ollama.health_check()
             
-            tg_user = db.query(TelegramUser).filter_by(telegram_id=user.id).first()
-            if not tg_user:
-                await update.message.reply_text("❌ Please link your account first")
-                return
+            status = f"""
+📊 <b>System Status</b>
+
+🤖 Bot: Online ✅
+"""
+            if health.get("cloud"):
+                status += "☁️ Ollama Cloud: Connected ✅\n"
+            if health.get("local"):
+                status += f"📱 Ollama Local: Connected ✅\n"
+                models = health.get("models", [])[:3]
+                if models:
+                    status += f"📦 Models: {', '.join(models)}\n"
             
-            # Get recent builds
-            builds = db.query(Build)\
-                .filter_by(user_id=tg_user.user_id)\
-                .order_by(Build.created_at.desc())\
-                .limit(5)\
-                .all()
+            status += f"\n🎯 Primary: {health.get('primary', 'none').upper()}"
             
-            if not builds:
-                await update.message.reply_text("📋 No builds found")
-                return
-            
-            status_text = "📊 **Recent Builds:**\n\n"
-            for build in builds:
-                status_icon = {
-                    BuildStatus.COMPLETED: "✅",
-                    BuildStatus.RUNNING: "⏳",
-                    BuildStatus.FAILED: "❌",
-                    BuildStatus.PENDING: "📝",
-                    BuildStatus.CANCELLED: "⛔"
-                }.get(build.status, "❓")
-                
-                status_text += f"{status_icon} `{build.id[:8]}` - {build.project_name}\n"
-                status_text += f"   Status: {build.status.value}\n"
-                if build.completed_at:
-                    status_text += f"   Completed: {build.completed_at.isoformat()}\n"
-                status_text += "\n"
-            
-            await update.message.reply_text(status_text, parse_mode="Markdown")
-            logger.info("Status command", user_id=user.id)
+            await update.message.reply_text(status, reply_markup=self.MAIN_KEYBOARD, parse_mode="HTML")
         except Exception as e:
-            logger.error(f"Status command failed: {e}")
-            await update.message.reply_text("❌ Error retrieving status")
+            await update.message.reply_text(f"❌ Error: {e}")
     
-    async def handle_history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /history command"""
+    async def handle_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /health command - check AI"""
         try:
-            db = SessionLocal()
-            user = update.effective_user
+            ollama = get_ollama_client()
+            await update.message.reply_text("🔄 Checking AI connection...", reply_markup=self.MAIN_KEYBOARD)
             
-            tg_user = db.query(TelegramUser).filter_by(telegram_id=user.id).first()
-            if not tg_user:
-                await update.message.reply_text("❌ Please link your account first")
-                return
+            health = await ollama.health_check()
             
-            # Get builds
-            builds = db.query(Build)\
-                .filter_by(user_id=tg_user.user_id)\
-                .order_by(Build.created_at.desc())\
-                .limit(10)\
-                .all()
+            if health.get("primary"):
+                msg = f"✅ <b>AI Connected!</b>\n\nMode: {health['primary'].title()}\n"
+                if health.get("models"):
+                    msg += f"Models: {', '.join(health['models'][:5])}"
+            else:
+                msg = "❌ <b>No AI connection!</b>\n\nCheck Ollama configuration."
             
-            if not builds:
-                await update.message.reply_text("📋 No history available")
-                return
-            
-            history_text = "📚 **Build History:**\n\n"
-            for build in builds:
-                history_text += f"• {build.project_name}\n"
-                history_text += f"  ID: `{build.id[:8]}`\n"
-                history_text += f"  Status: {build.status.value}\n"
-                if build.duration_seconds:
-                    history_text += f"  Time: {build.duration_seconds:.1f}s\n"
-                history_text += "\n"
-            
-            await update.message.reply_text(history_text, parse_mode="Markdown")
+            await update.message.reply_text(msg, reply_markup=self.MAIN_KEYBOARD, parse_mode="HTML")
         except Exception as e:
-            logger.error(f"History command failed: {e}")
-            await update.message.reply_text("❌ Error retrieving history")
+            await update.message.reply_text(f"❌ Error: {e}")
     
-    async def handle_link_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /link command - link Telegram to main account"""
+    async def handle_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /file command"""
+        args = context.args
+        
+        if not args:
+            await update.message.reply_text(
+                "📁 <b>File Operations</b>\n\n"
+                "Commands:\n"
+                "/file create [path] [content]\n"
+                "/file read [path]\n"
+                "/file delete [path]\n"
+                "/file list [path]\n"
+                "/file folder [path]",
+                reply_markup=self.FILE_KEYBOARD,
+                parse_mode="HTML"
+            )
+            return
+        
+        await update.message.reply_text("📁 Use the file menu buttons!", reply_markup=self.FILE_KEYBOARD)
+    
+    async def handle_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /post command"""
+        args = context.args
+        
+        if not args:
+            await update.message.reply_text(
+                "📱 <b>Social Media Posting</b>\n\n"
+                "Commands:\n"
+                "/post twitter [message]\n"
+                "/post linkedin [message]\n"
+                "/post facebook [message]\n"
+                "/post reddit [title] [subreddit]\n"
+                "/post medium [title]\n\n"
+                "Or use the Social menu!",
+                reply_markup=self.SOCIAL_KEYBOARD,
+                parse_mode="HTML"
+            )
+            return
+        
+        platform = args[0].lower()
+        text = " ".join(args[1:])
+        
+        browser = get_browser_controller()
+        result = await browser.create_social_post(platform, text)
+        
+        await update.message.reply_text(
+            result.message,
+            reply_markup=self.SOCIAL_KEYBOARD,
+            parse_mode="HTML" if "<b>" in result.message else None
+        )
+    
+    async def handle_open_url(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /open command"""
+        args = context.args
+        
+        if not args:
+            await update.message.reply_text("🌐 Usage: /open [URL]", reply_markup=self.BROWSER_KEYBOARD)
+            return
+        
+        url = args[0]
+        browser = get_browser_controller()
+        result = await browser.open_url(url)
+        
+        await update.message.reply_text(result.message, reply_markup=self.BROWSER_KEYBOARD)
+    
+    async def handle_link(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /link command"""
         try:
             user = update.effective_user
             chat_id = update.effective_chat.id
@@ -269,271 +449,711 @@ Need more help? Visit the documentation or contact support.
             await self._ensure_user_linked(user.id, user.username, chat_id)
             
             await update.message.reply_text(
-                "✅ Your Telegram account is now linked!\n\n"
-                "You can now use all commands. Try `/build my_project` to get started!"
+                "✅ <b>Account Linked!</b>",
+                reply_markup=self.MAIN_KEYBOARD,
+                parse_mode="HTML"
             )
         except Exception as e:
-            logger.error(f"Link command failed: {e}")
-            await update.message.reply_text("❌ Error linking account")
+            logger.error(f"Link failed: {e}")
     
-    async def handle_admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /admin command - admin operations"""
-        try:
-            user = update.effective_user
-            
-            # Check if user is admin
-            if user.id not in settings.admin_telegram_ids:
-                await update.message.reply_text("❌ Unauthorized")
-                return
-            
-            admin_text = """
-🔧 **Admin Commands:**
-
-• `/admin users` - Show user statistics
-• `/admin builds` - Show build statistics
-• `/admin health` - System health check
-• `/admin config` - Show configuration (redacted)
-"""
-            
-            await update.message.reply_text(admin_text, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Admin command failed: {e}")
-            await update.message.reply_text("❌ Error processing admin command")
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle regular messages"""
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle all text messages - BRIDGED to Agent AI Brain"""
         try:
             user = update.effective_user
             text = update.message.text
+            chat_id = update.effective_chat.id
             
-            db = SessionLocal()
-            tg_user = db.query(TelegramUser).filter_by(telegram_id=user.id).first()
+            handler = get_agent_handler()
             
-            if not tg_user:
-                await update.message.reply_text(
-                    "👋 Please link your account first using /link"
-                )
+            # Check for special button commands first
+            if text == "🏗️ Project":
+                result = await handler.process_message(chat_id, "Create a new project")
+                await self._send_response(chat_id, result, self.PROJECT_KEYBOARD)
+                return
+            elif text == "📱 Social":
+                result = await handler.process_message(chat_id, "Post to social media")
+                await self._send_response(chat_id, result, self.SOCIAL_KEYBOARD)
+                return
+            elif text == "📅 Schedule":
+                result = await handler.process_message(chat_id, "Schedule a task")
+                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
+                return
+            elif text == "🔄 Restart Agent":
+                result = await handler.process_message(chat_id, "Restart the agent")
+                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
+                return
+            elif text == "⚡ Shutdown":
+                result = await handler.process_message(chat_id, "Shutdown the agent")
+                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
+                return
+            elif text == "❓ Help":
+                result = await handler.process_message(chat_id, "Show help")
+                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
+                return
+            elif text == "⬅️ Back":
+                result = await handler.process_message(chat_id, "Go back to main menu")
+                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
+                return
+            elif text == "🐍 Python":
+                result = await handler.process_message(chat_id, "Create Python FastAPI project")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🟢 JavaScript":
+                result = await handler.process_message(chat_id, "Create JavaScript Node.js project")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🔵 TypeScript":
+                result = await handler.process_message(chat_id, "Create TypeScript project")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🐦 Tweet":
+                result = await handler.process_message(chat_id, "Post to Twitter")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📘 LinkedIn":
+                result = await handler.process_message(chat_id, "Post to LinkedIn")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📕 Facebook":
+                result = await handler.process_message(chat_id, "Post to Facebook")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📷 Instagram":
+                result = await handler.process_message(chat_id, "Post to Instagram")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📋 List Tasks":
+                result = await handler.process_message(chat_id, "List scheduled tasks")
+                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
+                return
+            elif text == "➕ New Task":
+                result = await handler.process_message(chat_id, "Create a new scheduled task")
+                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
+                return
+            elif text == "🗑️ Delete Task":
+                result = await handler.process_message(chat_id, "Delete a scheduled task")
+                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
+                return
+            elif text == "📖 Commands":
+                result = await handler.process_message(chat_id, "Show available commands")
+                await self._send_response(chat_id, result, self.HELP_KEYBOARD)
+                return
+            elif text == "💡 Tips":
+                result = await handler.process_message(chat_id, "Show tips for using the agent")
+                await self._send_response(chat_id, result, self.HELP_KEYBOARD)
+                return
+            elif text == "🔒 Security Audit":
+                result = await handler.process_message(chat_id, "I want to run a security audit on code")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "⚡ Performance":
+                result = await handler.process_message(chat_id, "I want to analyze code performance")
+                await self._send_response(chat_id, result)
+                return
+            # Legacy buttons - map to AI
+            elif text == "🏗️ New Project":
+                result = await handler.process_message(chat_id, "Create a new project")
+                await self._send_response(chat_id, result, self.PROJECT_KEYBOARD)
+                return
+            elif text == "💡 Use Skill":
+                result = await handler.process_message(chat_id, "Use a skill")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📁 Files":
+                result = await handler.process_message(chat_id, "File operations")
+                await self._send_response(chat_id, result, self.FILE_KEYBOARD)
+                return
+            elif text == "🌐 Browser":
+                result = await handler.process_message(chat_id, "Browser operations")
+                await self._send_response(chat_id, result, self.BROWSER_KEYBOARD)
+                return
+            elif text == "📊 My Builds":
+                result = await handler.process_message(chat_id, "Show my builds")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🔗 Link Account":
+                result = await handler.process_message(chat_id, "Link my account")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "💻 Code":
+                result = await handler.process_message(chat_id, "Code generation skills")
+                await self._send_response(chat_id, result, self.CODE_KEYBOARD)
+                return
+            elif text == "🔍 Analysis":
+                result = await handler.process_message(chat_id, "Code analysis skills")
+                await self._send_response(chat_id, result, self.ANALYSIS_KEYBOARD)
+                return
+            elif text == "🛠️ DevOps":
+                result = await handler.process_message(chat_id, "DevOps skills")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "📝 Docs":
+                result = await handler.process_message(chat_id, "Documentation skills")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🧪 Testing":
+                result = await handler.process_message(chat_id, "Testing skills")
+                await self._send_response(chat_id, result)
+                return
+            elif text == "🌐 Open URL":
+                await self._open_url_input(chat_id)
+                return
+            elif text == "📸 Screenshot":
+                result = await get_browser_controller().take_screenshot()
+                await self._send_response(chat_id, {"text": result.message}, self.BROWSER_KEYBOARD)
+                return
+            elif text == "📄 Create File":
+                self.user_sessions[chat_id] = {"action": "create_file"}
+                await self._send_response(chat_id, {"text": "📄 <b>Create File</b>\n\nSend: filename.txt:content"}, self.FILE_KEYBOARD)
+                return
+            elif text == "📖 Read File":
+                self.user_sessions[chat_id] = {"action": "read_file"}
+                await self._send_response(chat_id, {"text": "📖 <b>Read File</b>\n\nSend the file path:"}, self.FILE_KEYBOARD)
                 return
             
-            # Process message based on current state
-            if text.lower().startswith("analyze"):
-                await self._handle_analysis_request(update, text)
-            elif text.lower().startswith("generate"):
-                await self._handle_generation_request(update, text)
+            # Default: Send ALL text to AI brain via agent_handler
+            result = await handler.process_message(chat_id, text)
+            await self._send_response(chat_id, result)
+                
+        except Exception as e:
+            logger.error(f"Text handling failed: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+    
+    async def _send_response(self, chat_id: int, result: Dict, buttons=None):
+        """Send response with optional buttons"""
+        text = result.get("text", "No response")
+        reply_markup = buttons or self.MAIN_KEYBOARD
+        
+        try:
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+    
+    # Menu methods
+    async def _main_menu(self, chat_id: int):
+        """Show main menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🏠 <b>Main Menu</b>",
+            reply_markup=self.MAIN_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _new_project(self, chat_id: int):
+        """New project menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📦 <b>Create New Project</b>\n\nSend: /build [name] [description]\n\nExample: /build my_api REST API for users",
+            reply_markup=self.MAIN_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _skill_menu(self, chat_id: int):
+        """Skill categories menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="💡 <b>Select Skill Category:</b>",
+            reply_markup=self.SKILL_CATEGORIES,
+            parse_mode="HTML"
+        )
+    
+    async def _file_menu(self, chat_id: int):
+        """File operations menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📁 <b>File Operations</b>\n\nSelect an operation:",
+            reply_markup=self.FILE_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _browser_menu(self, chat_id: int):
+        """Browser menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🌐 <b>Browser Control</b>\n\nSelect an operation:",
+            reply_markup=self.BROWSER_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _social_menu(self, chat_id: int):
+        """Social media menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📱 <b>Social Media</b>\n\nSelect a platform:",
+            reply_markup=self.SOCIAL_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _code_skills(self, chat_id: int):
+        """Code skills menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="💻 <b>Code Generation Skills</b>",
+            reply_markup=self.CODE_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _analysis_skills(self, chat_id: int):
+        """Analysis skills menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🔍 <b>Analysis Skills</b>",
+            reply_markup=self.ANALYSIS_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _devops_skills(self, chat_id: int):
+        """DevOps skills menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🛠️ <b>DevOps Skills</b>",
+            reply_markup=self.DEVOPS_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _docs_skills(self, chat_id: int):
+        """Docs skills"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📝 <b>Documentation Skills</b>\n\nComing soon!",
+            reply_markup=self.SKILL_CATEGORIES,
+            parse_mode="HTML"
+        )
+    
+    async def _testing_skills(self, chat_id: int):
+        """Testing skills"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🧪 <b>Testing Skills</b>\n\nComing soon!",
+            reply_markup=self.SKILL_CATEGORIES,
+            parse_mode="HTML"
+        )
+    
+    # NEW 7-Button Menu Methods
+    async def _project_menu(self, chat_id: int):
+        """Project creation menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🏗️ <b>Create New Project</b>\n\nSelect programming language:",
+            reply_markup=self.PROJECT_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _schedule_menu(self, chat_id: int):
+        """Schedule menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📅 <b>Task Scheduler</b>\n\nSelect an operation:",
+            reply_markup=self.SCHEDULE_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _restart_agent(self, chat_id: int):
+        """Restart agent confirmation"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🔄 <b>Restart Agent</b>\n\nThe agent will restart and be back online in a few seconds.",
+            reply_markup=self.MAIN_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _shutdown_agent(self, chat_id: int):
+        """Shutdown agent confirmation"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="⚡ <b>⚠️ SHUTDOWN AGENT ⚠️</b>\n\nThis will stop the agent completely!\n\nTo restart, run: systemctl start ultimate-agent",
+            reply_markup=self.MAIN_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _help_menu(self, chat_id: int):
+        """Help menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="❓ <b>Help & Commands</b>\n\nSelect a topic:",
+            reply_markup=self.HELP_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    async def _analysis_menu(self, chat_id: int):
+        """Analysis skills menu"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🔍 <b>Analysis Skills</b>",
+            reply_markup=self.ANALYSIS_KEYBOARD,
+            parse_mode="HTML"
+        )
+    
+    # File operation handlers
+    async def _create_file_input(self, chat_id: int):
+        """Request file creation"""
+        self.user_sessions[chat_id] = {"action": "create_file"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📄 <b>Create File</b>\n\nSend in format:\n<code>filename.txt:content here</code>",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    async def _read_file_input(self, chat_id: int):
+        """Request file read"""
+        self.user_sessions[chat_id] = {"action": "read_file"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📖 <b>Read File</b>\n\nSend the file path:",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    async def _edit_file_input(self, chat_id: int):
+        """Request file edit"""
+        self.user_sessions[chat_id] = {"action": "edit_file"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="✏️ <b>Edit File</b>\n\nSend: <code>path:old_text:new_text</code>",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    async def _delete_file_input(self, chat_id: int):
+        """Request file delete"""
+        self.user_sessions[chat_id] = {"action": "delete_file"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🗑️ <b>Delete File</b>\n\nSend the file path:",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    async def _create_folder_input(self, chat_id: int):
+        """Request folder create"""
+        self.user_sessions[chat_id] = {"action": "create_folder"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📁 <b>Create Folder</b>\n\nSend the folder path:",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    async def _list_folder_input(self, chat_id: int):
+        """Request folder list"""
+        self.user_sessions[chat_id] = {"action": "list_folder"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📂 <b>List Folder</b>\n\nSend the folder path (or 'workspace'):",
+            parse_mode="HTML",
+            reply_markup=self.FILE_KEYBOARD
+        )
+    
+    # Browser handlers
+    async def _open_url_input(self, chat_id: int):
+        """Request URL to open"""
+        self.user_sessions[chat_id] = {"action": "open_url"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🌐 <b>Open URL</b>\n\nSend the URL to open:",
+            parse_mode="HTML",
+            reply_markup=self.BROWSER_KEYBOARD
+        )
+    
+    async def _take_screenshot(self, chat_id: int):
+        """Take screenshot"""
+        browser = get_browser_controller()
+        result = await browser.take_screenshot()
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text=result.message,
+            reply_markup=self.BROWSER_KEYBOARD
+        )
+    
+    async def _check_browsers(self, chat_id: int):
+        """Check available browsers"""
+        browser = get_browser_controller()
+        result = await browser.list_browsers()
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text=result.message,
+            reply_markup=self.BROWSER_KEYBOARD
+        )
+    
+    # Social handlers
+    async def _tweet_input(self, chat_id: int):
+        """Request tweet text"""
+        self.user_sessions[chat_id] = {"action": "tweet"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🐦 <b>Post Tweet</b>\n\nSend your tweet (max 280 chars):",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    async def _linkedin_input(self, chat_id: int):
+        """Request LinkedIn post"""
+        self.user_sessions[chat_id] = {"action": "linkedin"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📘 <b>Post to LinkedIn</b>\n\nSend your post:",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    async def _facebook_input(self, chat_id: int):
+        """Request Facebook post"""
+        self.user_sessions[chat_id] = {"action": "facebook"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📕 <b>Post to Facebook</b>\n\nSend your post:",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    async def _instagram_input(self, chat_id: int):
+        """Instagram"""
+        self.user_sessions[chat_id] = {"action": "instagram"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📷 <b>Instagram</b>\n\nOpening Instagram web...",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+        browser = get_browser_controller()
+        await browser.open_url("https://instagram.com")
+    
+    async def _reddit_input(self, chat_id: int):
+        """Request Reddit post"""
+        self.user_sessions[chat_id] = {"action": "reddit"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="🤖 <b>Post to Reddit</b>\n\nSend: <code>title:r/subreddit</code>",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    async def _medium_input(self, chat_id: int):
+        """Medium post"""
+        self.user_sessions[chat_id] = {"action": "medium"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📝 <b>Post to Medium</b>\n\nSend: <code>title:content</code>",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    async def _announcement_input(self, chat_id: int):
+        """Announcement"""
+        self.user_sessions[chat_id] = {"action": "announcement"}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text="📢 <b>Post Announcement</b>\n\nSend your announcement (will post to Twitter & LinkedIn):",
+            parse_mode="HTML",
+            reply_markup=self.SOCIAL_KEYBOARD
+        )
+    
+    # Execute skills
+    async def _execute_skill(self, chat_id: int, skill_slug: str, params: Dict):
+        """Execute a skill"""
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text=f"⚡ Executing <b>{skill_slug}</b>...",
+            parse_mode="HTML"
+        )
+        
+        result = await get_skill_registry().execute_skill(skill_slug, params)
+        
+        if result.success:
+            output = result.output[:3500]
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ <b>Done!</b>\n\n⏱️ {result.duration_ms:.0f}ms\n\n{output}",
+                reply_markup=self.SKILL_CATEGORIES,
+                parse_mode="HTML"
+            )
+        else:
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Failed: {result.error}",
+                reply_markup=self.SKILL_CATEGORIES
+            )
+    
+    async def _request_code(self, chat_id: int, skill: str, prompt: str):
+        """Request code for analysis"""
+        self.user_sessions[chat_id] = {"action": "analyze_code", "skill": skill}
+        await self.application.bot.send_message(
+            chat_id=chat_id,
+            text=f"📝 {prompt}\n\nSend code in a code block (```language ... ```)",
+            parse_mode="HTML",
+            reply_markup=self.ANALYSIS_KEYBOARD
+        )
+    
+    async def _process_input(self, user_id: int, text: str):
+        """Process user input for pending actions"""
+        session = self.user_sessions.get(user_id, {})
+        action = session.get("action")
+        
+        if not action:
+            await self.application.bot.send_message(
+                chat_id=user_id,
+                text="🤔 Use the menu buttons or /help!",
+                reply_markup=self.MAIN_KEYBOARD
+            )
+            return
+        
+        del self.user_sessions[user_id]
+        
+        # Process based on action
+        if action == "create_file":
+            if ":" in text:
+                path, content = text.split(":", 1)
+                result = await get_file_manager().create_file(path.strip(), content.strip())
             else:
-                await update.message.reply_text(
-                    "I don't understand that command. Try /help for available commands."
-                )
-            
-            logger.info("Message handled", user_id=user.id, text=text[:50])
-        except Exception as e:
-            logger.error(f"Message handling failed: {e}")
-            await update.message.reply_text("❌ Error processing message")
-    
-    async def handle_button_click(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle inline button clicks"""
-        try:
-            query = update.callback_query
-            await query.answer()
-            
-            data = query.data
-            
-            if data == "cancel":
-                await query.edit_message_text("❌ Cancelled")
-            elif data.startswith("build_"):
-                await self._process_build_selection(query, data)
-            
-            logger.info("Button clicked", data=data, user_id=update.effective_user.id)
-        except Exception as e:
-            logger.error(f"Button click failed: {e}")
-    
-    async def _handle_analysis_request(self, update: Update, text: str):
-        """Handle code analysis request"""
-        try:
-            await update.message.reply_text("🔍 Analyzing your code with Qwen3-coder cloud...")
-            
-            # Extract code from message (between markdown code blocks or as plain text)
-            code_to_analyze = text
+                result = await get_file_manager().create_file(f"{text}.txt", f"Content: {text}")
+        
+        elif action == "read_file":
+            result = await get_file_manager().read_file(text.strip())
+        
+        elif action == "edit_file":
+            if ":" in text:
+                parts = text.split(":")
+                if len(parts) >= 3:
+                    path, old_text, new_text = parts[0], parts[1], ":".join(parts[2:])
+                    result = await get_file_manager().edit_file(path.strip(), old_text, new_text)
+                else:
+                    result = await get_file_manager().edit_file(parts[0], None, parts[1] if len(parts) > 1 else "")
+            else:
+                result = await get_file_manager().edit_file(text, None, text)
+        
+        elif action == "delete_file":
+            result = await get_file_manager().delete_file(text.strip())
+        
+        elif action == "create_folder":
+            result = await get_file_manager().create_folder(text.strip())
+        
+        elif action == "list_folder":
+            path = text.strip() if text.strip() not in ["workspace", "."] else "."
+            result = await get_file_manager().list_directory(path)
+        
+        elif action == "open_url":
+            result = await get_browser_controller().open_url(text.strip())
+        
+        elif action == "tweet":
+            result = await get_browser_controller().post_to_twitter(text[:280])
+        
+        elif action == "linkedin":
+            result = await get_browser_controller().post_to_linkedin(text)
+        
+        elif action == "facebook":
+            result = await get_browser_controller().post_to_facebook(text)
+        
+        elif action == "reddit":
+            if "r/" in text:
+                parts = text.split("r/")
+                title = parts[0].strip()
+                subreddit = parts[1].strip() if len(parts) > 1 else "all"
+                result = await get_browser_controller().post_to_reddit(title, subreddit=subreddit)
+            else:
+                result = await get_browser_controller().post_to_reddit(text)
+        
+        elif action == "medium":
+            if ":" in text:
+                title, content = text.split(":", 1)
+                result = await get_browser_controller().post_to_medium(title.strip(), content.strip())
+            else:
+                result = await get_browser_controller().post_to_medium(text.strip())
+        
+        elif action == "announcement":
+            result = await get_browser_controller().post_announcement(text, text, ["twitter", "linkedin"])
+        
+        elif action == "analyze_code":
+            # Extract code from markdown
+            code = text
+            language = "python"
             if "```" in text:
-                code_to_analyze = text.split("```")[1].strip()
-            
-            # Detect language from code blocks or ask user
-            language = "python"
-            if "```javascript" in text or "```js" in text or "```typescript" in text or "```ts" in text:
-                language = "javascript"
-            elif "```java" in text:
-                language = "java"
-            elif "```cpp" in text or "```c++" in text:
-                language = "cpp"
-            elif "```go" in text:
-                language = "go"
-            elif "```rust" in text:
-                language = "rust"
-            
-            # Get agent workflow and analyze
-            workflow = get_agent_workflow()
-            analysis_results = await workflow.analyze_code(
-                code=code_to_analyze,
-                language=language,
-                focus_areas=["security", "performance", "maintainability"]
+                parts = text.split("```")
+                if len(parts) >= 2:
+                    first = parts[0].strip()
+                    code_part = parts[1]
+                    if "\n" in code_part:
+                        language, code = code_part.split("\n", 1)
+                    else:
+                        code = code_part
+            result = await get_skill_registry().execute_skill(
+                session.get("skill", "security-audit"),
+                {"code": code, "language": language}
             )
-            
-            # Format response
-            response = "✅ **Code Analysis Complete**\n\n"
-            response += f"**Language:** {language}\n"
-            response += f"**Model:** {analysis_results.get('model', 'Qwen3-coder')}\n"
-            response += f"**Lines of Code:** {analysis_results['metrics'].get('lines_of_code', 'N/A')}\n\n"
-            
-            if analysis_results['issues']:
-                response += "**Issues Found:**\n"
-                for issue in analysis_results['issues'][:5]:
-                    response += f"• [{issue.get('severity', 'info').upper()}] {issue.get('type', 'Issue')}: {issue.get('description', 'N/A')}\n"
-            else:
-                response += "**No issues found! ✨**\n"
-            
-            if analysis_results['recommendations']:
-                response += "\n**Recommendations:**\n"
-                for rec in analysis_results['recommendations'][:3]:
-                    response += f"• {rec}\n"
-            
-            await update.message.reply_text(response, parse_mode="Markdown")
-            logger.info("Code analysis completed", user_id=update.effective_user.id, issues=len(analysis_results['issues']), model=analysis_results.get('model'))
-        except Exception as e:
-            logger.error(f"Analysis request failed: {e}")
-            await update.message.reply_text("❌ Analysis failed. Please try again.")
+            await self.application.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Analysis complete!\n\n{result.output[:2000] if result.output else result.error}",
+                reply_markup=self.ANALYSIS_KEYBOARD,
+                parse_mode="HTML" if result.success else None
+            )
+            return
+        
+        else:
+            result = None
+        
+        if result:
+            await self.application.bot.send_message(
+                chat_id=user_id,
+                text=result.message,
+                reply_markup=self.MAIN_KEYBOARD
+            )
     
-    async def _handle_generation_request(self, update: Update, text: str):
-        """Handle code generation request"""
-        try:
-            await update.message.reply_text("✨ Generating code with Qwen3-coder cloud...")
-            
-            # Extract goal from message
-            goal = text.replace("generate", "").strip()
-            if not goal:
-                goal = "A well-structured Python function"
-            
-            # Detect language preference
-            language = "python"
-            if "javascript" in goal.lower() or "typescript" in goal.lower() or "nodejs" in goal.lower():
-                language = "javascript"
-            elif "java" in goal.lower():
-                language = "java"
-            elif "rust" in goal.lower():
-                language = "rust"
-            elif "go" in goal.lower() or "golang" in goal.lower():
-                language = "go"
-            
-            logger.info("Code generation started", user_id=update.effective_user.id, goal=goal, language=language)
-            
-            # Get agent workflow and generate code
-            workflow = get_agent_workflow()
-            generated_code = await workflow.generate_code(
-                specification=goal,
-                language=language,
-                context="Generated via Telegram bot using Qwen3-coder"
-            )
-            
-            # Format response
-            response = f"```{language}\n{generated_code}\n```\n\n✅ Code generated with Qwen3-coder!"
-            response += f"\n**Language:** {language}"
-            response += f"\n**Lines:** {len(generated_code.split(chr(10)))}"
-            
-            await update.message.reply_text(response, parse_mode="Markdown")
-            logger.info("Code generation completed", user_id=update.effective_user.id, lines=len(generated_code.split('\n')))
-        except Exception as e:
-            logger.error(f"Generation request failed: {e}")
-            await update.message.reply_text("❌ Code generation failed. Please try again.")
-    
-    async def _process_build_selection(self, query, data: str):
-        """Process language selection for build"""
-        try:
-            parts = data.split("_")
-            language = parts[1]
-            project_name = "_".join(parts[2:])
-            
-            await query.edit_message_text(
-                f"🚀 Starting build for `{project_name}` in {language.upper()} using Qwen3-coder...",
-                parse_mode="Markdown"
-            )
-            
-            # Create build record
-            db = SessionLocal()
-            build = Build(
-                project_name=project_name,
-                language=language,
-                status=BuildStatus.PENDING,
-                user_id=query.from_user.id
-            )
-            db.add(build)
-            db.flush()
-            
-            logger.info(
-                "Build created",
-                build_id=build.id,
-                project=project_name,
-                language=language,
-                user_id=query.from_user.id
-            )
-            
-            # Generate build using Agent Workflow with Qwen3-coder
-            try:
-                workflow = get_agent_workflow()
-                specification = f"Create a complete {language} project for {project_name}"
-                
-                generated_code = await workflow.generate_code(
-                    specification=specification,
-                    language=language,
-                    context=f"Project: {project_name}, Type: Starter project"
-                )
-                
-                # Update build status
-                build.status = BuildStatus.COMPLETED
-                build.result = generated_code[:1000]  # Store first 1000 chars as preview
-                
-                db.add(build)
-                db.commit()
-                
-                response = f"✅ **Build Complete**\n\n"
-                response += f"**Project:** {project_name}\n"
-                response += f"**Language:** {language.upper()}\n"
-                response += f"**Model:** Qwen3-coder (Ollama Cloud)\n"
-                response += f"**Build ID:** `{build.id[:8]}`\n\n"
-                response += f"**Generated (Preview):**\n```{language}\n{generated_code[:300]}...\n```"
-                
-                await query.edit_message_text(response, parse_mode="Markdown")
-                
-                logger.info("Build completed with Qwen3-coder", build_id=build.id, project=project_name)
-            except Exception as build_error:
-                logger.error(f"Build generation failed: {build_error}")
-                build.status = BuildStatus.FAILED
-                db.add(build)
-                db.commit()
-                
-                await query.edit_message_text(
-                    f"❌ Build failed: {str(build_error)[:100]}",
-                    parse_mode="Markdown"
-                )
-            
+    async def _my_builds(self, chat_id: int, user_id: int):
+        """Show user's builds"""
+        db = SessionLocal()
+        tg_user = db.query(TelegramUser).filter_by(telegram_id=user_id).first()
+        
+        if not tg_user:
             db.close()
-        except Exception as e:
-            logger.error(f"Build creation failed: {e}")
-            await query.edit_message_text("❌ Build creation failed. Please try again.")
+            await self.application.bot.send_message(chat_id=chat_id, text="❌ Please link your account first!", reply_markup=self.MAIN_KEYBOARD)
+            return
+        
+        builds = db.query(Build).filter_by(user_id=tg_user.user_id).order_by(Build.created_at.desc()).limit(5).all()
+        db.close()
+        
+        if not builds:
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text="📊 <b>No builds yet!</b>\n\nUse /build to create one!",
+                reply_markup=self.MAIN_KEYBOARD,
+                parse_mode="HTML"
+            )
+            return
+        
+        text = "📊 <b>Your Builds</b>\n\n"
+        for build in builds:
+            icon = {"completed": "✅", "running": "⏳", "failed": "❌", "pending": "📝"}.get(build.status.value, "❓")
+            text += f"{icon} <b>{build.project_name}</b>\n   📅 {build.created_at.strftime('%Y-%m-%d')}\n\n"
+        
+        await self.application.bot.send_message(chat_id=chat_id, text=text, reply_markup=self.MAIN_KEYBOARD, parse_mode="HTML")
+    
+    async def _history(self, chat_id: int, user_id: int):
+        """Show history"""
+        await self._my_builds(chat_id, user_id)
+    
+    async def _link_account(self, chat_id: int, user):
+        """Link account"""
+        await self._ensure_user_linked(user.id, user.username, chat_id)
+        await self.application.bot.send_message(chat_id=chat_id, text="✅ <b>Account Linked!</b>", parse_mode="HTML", reply_markup=self.MAIN_KEYBOARD)
     
     async def _ensure_user_linked(self, telegram_id: int, username: Optional[str], chat_id: int):
-        """Ensure Telegram user is linked"""
+        """Ensure user is linked"""
         db = SessionLocal()
-        
         tg_user = db.query(TelegramUser).filter_by(telegram_id=telegram_id).first()
         
         if not tg_user:
-            # Create new user entry
             user = User(
                 username=username or f"telegram_{telegram_id}",
                 email=f"telegram_{telegram_id}@agent.local",
                 hashed_password="",
                 role="user",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             db.add(user)
             db.flush()
@@ -543,37 +1163,37 @@ Need more help? Visit the documentation or contact support.
                 telegram_id=telegram_id,
                 telegram_username=username,
                 chat_id=chat_id,
-                is_active=True
+                is_active=True,
             )
             db.add(tg_user)
             db.commit()
-            
-            logger.info("User linked", telegram_id=telegram_id, user_id=user.id)
-    
-    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
-        """Handle bot errors"""
-        logger.error(f"Telegram error: {context.error}")
+            logger.info("User linked", telegram_id=telegram_id)
+        
+        db.close()
     
     async def start(self):
-        """Start bot polling"""
-        if not self.token:
-            logger.warning("Telegram bot not started: no token configured")
+        """Start bot"""
+        if not self.token or not self.application:
+            logger.warning("Bot not initialized")
             return
         
         try:
-            await self.application.initialize()
+            webhook_url = f"{settings.telegram_webhook_url}/telegram/webhook" if settings.telegram_webhook_url else None
+            
+            if webhook_url:
+                await self.application.bot.set_webhook(webhook_url)
+                logger.info(f"Webhook set to {webhook_url}")
+            
             await self.application.start()
-            await self.application.updater.start_polling()
             logger.info("Telegram bot started")
         except Exception as e:
             logger.error(f"Bot start failed: {e}")
             raise
     
     async def stop(self):
-        """Stop bot polling"""
+        """Stop bot"""
         if self.application:
             try:
-                await self.application.updater.stop()
                 await self.application.stop()
                 await self.application.shutdown()
                 logger.info("Telegram bot stopped")
@@ -581,12 +1201,11 @@ Need more help? Visit the documentation or contact support.
                 logger.warning(f"Bot stop failed: {e}")
 
 
-# Global bot manager
 _bot_manager: Optional[TelegramBotManager] = None
 
 
 def get_telegram_bot() -> TelegramBotManager:
-    """Get or initialize Telegram bot"""
+    """Get or create bot"""
     global _bot_manager
     if _bot_manager is None:
         _bot_manager = TelegramBotManager()
@@ -594,28 +1213,57 @@ def get_telegram_bot() -> TelegramBotManager:
 
 
 async def init_telegram_bot():
-    """Initialize Telegram bot on startup"""
+    """Initialize bot"""
     try:
         bot = get_telegram_bot()
         await bot.initialize()
         logger.info("Telegram bot initialized")
     except Exception as e:
-        logger.warning(f"Telegram bot initialization skipped: {e}")
+        logger.warning(f"Bot initialization skipped: {e}")
 
 
 async def start_telegram_bot():
-    """Start Telegram bot"""
+    """Start bot"""
     try:
         bot = get_telegram_bot()
         await bot.start()
     except Exception as e:
-        logger.warning(f"Telegram bot start skipped: {e}")
+        logger.warning(f"Bot start skipped: {e}")
 
 
 async def stop_telegram_bot():
-    """Stop Telegram bot"""
+    """Stop bot"""
     try:
         bot = get_telegram_bot()
         await bot.stop()
     except Exception as e:
-        logger.warning(f"Telegram bot stop failed: {e}")
+        logger.warning(f"Bot stop failed: {e}")
+
+
+async def notify_admin_on_startup():
+    """Send startup notification"""
+    try:
+        bot = get_telegram_bot()
+        if bot.application and settings.admin_telegram_ids:
+            ollama = get_ollama_client()
+            health = await ollama.health_check()
+            mode = health.get("primary", "unknown").upper()
+            
+            for admin_id in settings.admin_telegram_ids:
+                msg = f"""🚀 <b>Ultimate Coding Agent Started</b>
+
+✅ Status: Online
+🤖 Mode: {mode}
+🌐 API: http://localhost:8000
+
+Commands:
+/build [name] [desc] - Create project
+/file [operation] - File operations
+/post [platform] [text] - Social posting
+/skill - Open skills menu
+"""
+                
+                await bot.application.bot.send_message(chat_id=admin_id, text=msg, reply_markup=bot.MAIN_KEYBOARD, parse_mode="HTML")
+                logger.info(f"Startup notification sent to admin {admin_id}")
+    except Exception as e:
+        logger.warning(f"Failed to send admin notification: {e}")

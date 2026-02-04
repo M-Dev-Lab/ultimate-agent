@@ -2,25 +2,23 @@
 Main FastAPI application with security configuration
 """
 
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.exceptions import RequestValidationError
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from datetime import datetime
 import logging
+import sys
 import structlog
+from pathlib import Path
 
-from app.core.config import settings
-from app.models.schemas import ErrorResponse
-from app.api import build_router, analysis_router, health_router, websocket_router, memory_router
-from app.db.session import init_db, close_db
-from app.memory import init_memory_system, shutdown_memory_system
+# Configure logs directory
+LOGS_DIR = Path(__file__).parent.parent / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
 
-# Configure structured logging
+# Configure file handler for debugging
+file_handler = logging.FileHandler(LOGS_DIR / "app.log", mode='a')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+))
+
+# Configure structured logging FIRST
 structlog.configure(
     processors=[
         structlog.stdlib.filter_by_level,
@@ -38,7 +36,30 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
+# Get root logger and add file handler
 logger = structlog.get_logger()
+
+# Add file handler to root logger
+root_logger = logging.getLogger()
+root_logger.addHandler(file_handler)
+root_logger.setLevel(logging.DEBUG)
+
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.exceptions import RequestValidationError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from datetime import datetime
+
+from app.core.config import settings
+from app.models.schemas import ErrorResponse
+from app.api import build_router, analysis_router, health_router, websocket_router, memory_router
+from app.db.session import init_db, close_db
+from app.memory import init_memory_system, shutdown_memory_system
+from app.integrations.telegram_bot import init_telegram_bot, start_telegram_bot, stop_telegram_bot, notify_admin_on_startup
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -51,7 +72,6 @@ app = FastAPI(
 # Configure rate limiting
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ==================== Middleware Configuration ====================
@@ -72,7 +92,7 @@ app.add_middleware(
 )
 
 
-# ==================== Custom Exception Handlers ====================
+# ==================== Exception Handlers ====================
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -195,16 +215,29 @@ async def health_check():
     }
 
 
-@app.get("/", tags=["System"])
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "name": settings.app_name,
-        "version": settings.app_version,
-        "status": "operational",
-        "docs": "/docs",
-        "openapi": "/openapi.json",
-    }
+# ==================== Telegram Webhook Endpoint ====================
+
+@app.post("/telegram/webhook", tags=["Telegram"])
+async def telegram_webhook(request: Request):
+    """Handle Telegram webhook updates"""
+    from telegram import Update
+    from app.integrations.telegram_bot import get_telegram_bot
+    
+    bot = get_telegram_bot()
+    if not bot.application:
+        return {"status": "ok", "message": "Bot not initialized"}
+    
+    try:
+        data = await request.json()
+        update = Update.de_json(data, bot.application.bot)
+        await bot.application.process_update(update)
+    except KeyError as e:
+        # Handle missing fields in test data
+        logger.warning(f"Telegram webhook missing field: {e}")
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+    
+    return {"status": "ok"}
 
 
 # ==================== Ready for Route Imports ====================
@@ -222,7 +255,7 @@ logger.info("FastAPI application initialized", app=settings.app_name, version=se
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and memory on startup"""
+    """Initialize database, memory, and Telegram bot on startup"""
     logger.info("Starting application", app=settings.app_name)
     try:
         # Initialize database
@@ -233,8 +266,22 @@ async def startup_event():
         init_memory_system()
         logger.info("Persistent memory system initialized")
         
+        # Initialize and start Telegram bot
+        logger.info("Initializing Telegram bot...")
+        await init_telegram_bot()
+        logger.info("Telegram bot initialized, starting...")
+        await start_telegram_bot()
+        logger.info("Telegram bot started")
+        
+        # Send startup notification to admin
+        logger.info("Sending startup notification to admin...")
+        await notify_admin_on_startup()
+        logger.info("Startup notification sent")
+        
+        logger.info("All startup tasks completed successfully")
+        
     except Exception as e:
-        logger.error("Startup initialization failed", error=str(e))
+        logger.error("Startup initialization failed", error=str(e), exc_info=True)
         raise
 
 
@@ -243,6 +290,10 @@ async def shutdown_event():
     """Clean up resources on application shutdown"""
     logger.info("Shutting down application")
     try:
+        # Stop Telegram bot
+        await stop_telegram_bot()
+        logger.info("Telegram bot stopped")
+        
         # Shutdown memory system (consolidates memory)
         shutdown_memory_system()
         logger.info("Memory system shutdown complete")

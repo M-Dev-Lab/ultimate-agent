@@ -39,7 +39,7 @@ prometheus-client==0.19.0
 loguru==0.7.2
 
 # Telegram Bot
-python-telegram-bot==20.4
+python-telegram-bot>=21.0
 
 # File & Path Handling
 aiofiles==23.2.1
@@ -63,4 +63,9 @@ tabulate==0.9.0
 ollama==0.6.1
 requests==2.31.0
 
+# Task Scheduling
+APScheduler==3.10.4
+
+# System Monitoring
+psutil==5.9.8
 

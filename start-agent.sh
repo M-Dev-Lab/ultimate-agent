@@ -331,6 +331,28 @@ start_python_agent() {
         exit 1
     fi
     
+    # Clear port 8000 before starting
+    print_section "Step 1: Clearing Ports"
+    echo "🧹 Checking and freeing port 8000..."
+    for port in 8000 8001; do
+        local PORT_PID
+        PORT_PID=$(get_port_pid $port)
+        if [ -n "$PORT_PID" ]; then
+            echo "🗑️  Killing process on port $port (PID: $PORT_PID)"
+            kill -9 $PORT_PID 2>/dev/null || true
+            sleep 1
+        else
+            echo "✅ Port $port is clear"
+        fi
+    done
+    
+    # Kill any existing uvicorn/python processes for this agent
+    echo ""
+    echo "🧹 Cleaning up existing processes..."
+    pkill -f "uvicorn.*app.main:app" 2>/dev/null || true
+    pkill -f "python.*uvicorn" 2>/dev/null || true
+    sleep 2
+    
     # Activate venv and start agent
     source venv/bin/activate
     
@@ -342,6 +364,7 @@ start_python_agent() {
         fi
     fi
     
+    echo ""
     echo "📊 Python Agent Configuration:"
     echo "   API Host:    127.0.0.1:8000"
     echo "   Database:    SQLite (./data/agent.db)"
@@ -373,22 +396,28 @@ stop_server() {
     echo "🛑 Stopping Ultimate Agent..."
     echo ""
     
+    # Kill all related processes
+    echo "🔨 Stopping Python agent processes..."
+    pkill -f "uvicorn.*app.main:app" 2>/dev/null || true
+    pkill -f "uvicorn" 2>/dev/null || true
     pkill -f "node.*server" 2>/dev/null || true
     pkill -f "tsx src/telegram" 2>/dev/null || true
     pkill -f "npm start" 2>/dev/null || true
-    pkill -f "uvicorn" 2>/dev/null || true
-    pkill -f "python.*agent" 2>/dev/null || true
     sleep 2
     
-    for port in 3000 5173 3001 8000; do
+    # Force kill any remaining processes on our ports
+    for port in 3000 5173 3001 8000 8001; do
         local PORT_PID
         PORT_PID=$(get_port_pid $port)
         if [ -n "$PORT_PID" ]; then
+            echo "🗑️  Force killing PID $PORT_PID on port $port"
             kill -9 $PORT_PID 2>/dev/null || true
         fi
     done
     
-    print_success "Server stopped"
+    sleep 1
+    echo ""
+    print_success "Server stopped successfully"
 }
 
 restart_server() {
