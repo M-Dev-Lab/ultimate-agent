@@ -127,22 +127,49 @@ class OllamaClient:
                 }
                 
                 result = await self._call_ollama(self.ollama_host, data, headers)
-                return result.get("message", {}).get("content", "")
+                return self._extract_response(result)
                 
             except Exception as e:
-                logger.warning(f"⚠️ Cloud chat failed: {e}, using local...")
+                logger.warning(f"Cloud chat failed: {e}, using local...")
         
         # Fallback to local
-        local_model = model or self.local_model
-        data = {
-            "model": local_model,
-            "messages": messages,
-            "stream": False,
-            **kwargs
-        }
-        
-        result = await self._call_ollama(self.local_host, data)
-        return result.get("message", {}).get("content", "")
+        try:
+            local_model = model or self.local_model
+            data = {
+                "model": local_model,
+                "messages": messages,
+                "stream": False,
+                **kwargs
+            }
+            
+            result = await self._call_ollama(self.local_host, data)
+            return self._extract_response(result)
+            
+        except Exception as e:
+            logger.error(f"All chat methods failed: {e}")
+            raise Exception(f"Unable to get AI response: {e}")
+    
+    def _extract_response(self, result: Dict) -> str:
+        """Extract content from Ollama response"""
+        try:
+            if isinstance(result, str):
+                return result
+            
+            if "message" in result and isinstance(result["message"], dict):
+                return result["message"].get("content", str(result))
+            
+            if "response" in result:
+                return result["response"]
+            
+            if "output" in result:
+                return result["output"]
+            
+            logger.warning(f"Unexpected Ollama response structure: {result.keys()}")
+            return str(result)
+            
+        except Exception as e:
+            logger.error(f"Response extraction failed: {e}")
+            return str(result)
     
     async def embeddings(self, text: str, model: Optional[str] = None) -> List[float]:
         """Generate embeddings"""

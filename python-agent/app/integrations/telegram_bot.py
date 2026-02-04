@@ -463,161 +463,35 @@ class TelegramBotManager:
             text = update.message.text
             chat_id = update.effective_chat.id
             
-            handler = get_agent_handler()
+            logger.info(f"Telegram message received: {text[:50]}...", user_id=user.id)
             
-            # Check for special button commands first
-            if text == "🏗️ Project":
-                result = await handler.process_message(chat_id, "Create a new project")
-                await self._send_response(chat_id, result, self.PROJECT_KEYBOARD)
-                return
-            elif text == "📱 Social":
-                result = await handler.process_message(chat_id, "Post to social media")
-                await self._send_response(chat_id, result, self.SOCIAL_KEYBOARD)
-                return
-            elif text == "📅 Schedule":
-                result = await handler.process_message(chat_id, "Schedule a task")
-                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
-                return
-            elif text == "🔄 Restart Agent":
-                result = await handler.process_message(chat_id, "Restart the agent")
-                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
-                return
-            elif text == "⚡ Shutdown":
-                result = await handler.process_message(chat_id, "Shutdown the agent")
-                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
-                return
-            elif text == "❓ Help":
-                result = await handler.process_message(chat_id, "Show help")
-                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
-                return
-            elif text == "⬅️ Back":
-                result = await handler.process_message(chat_id, "Go back to main menu")
-                await self._send_response(chat_id, result, self.MAIN_KEYBOARD)
-                return
-            elif text == "🐍 Python":
-                result = await handler.process_message(chat_id, "Create Python FastAPI project")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🟢 JavaScript":
-                result = await handler.process_message(chat_id, "Create JavaScript Node.js project")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🔵 TypeScript":
-                result = await handler.process_message(chat_id, "Create TypeScript project")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🐦 Tweet":
-                result = await handler.process_message(chat_id, "Post to Twitter")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📘 LinkedIn":
-                result = await handler.process_message(chat_id, "Post to LinkedIn")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📕 Facebook":
-                result = await handler.process_message(chat_id, "Post to Facebook")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📷 Instagram":
-                result = await handler.process_message(chat_id, "Post to Instagram")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📋 List Tasks":
-                result = await handler.process_message(chat_id, "List scheduled tasks")
-                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
-                return
-            elif text == "➕ New Task":
-                result = await handler.process_message(chat_id, "Create a new scheduled task")
-                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
-                return
-            elif text == "🗑️ Delete Task":
-                result = await handler.process_message(chat_id, "Delete a scheduled task")
-                await self._send_response(chat_id, result, self.SCHEDULE_KEYBOARD)
-                return
-            elif text == "📖 Commands":
-                result = await handler.process_message(chat_id, "Show available commands")
-                await self._send_response(chat_id, result, self.HELP_KEYBOARD)
-                return
-            elif text == "💡 Tips":
-                result = await handler.process_message(chat_id, "Show tips for using the agent")
-                await self._send_response(chat_id, result, self.HELP_KEYBOARD)
-                return
-            elif text == "🔒 Security Audit":
-                result = await handler.process_message(chat_id, "I want to run a security audit on code")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "⚡ Performance":
-                result = await handler.process_message(chat_id, "I want to analyze code performance")
-                await self._send_response(chat_id, result)
-                return
-            # Legacy buttons - map to AI
-            elif text == "🏗️ New Project":
-                result = await handler.process_message(chat_id, "Create a new project")
-                await self._send_response(chat_id, result, self.PROJECT_KEYBOARD)
-                return
-            elif text == "💡 Use Skill":
-                result = await handler.process_message(chat_id, "Use a skill")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📁 Files":
-                result = await handler.process_message(chat_id, "File operations")
-                await self._send_response(chat_id, result, self.FILE_KEYBOARD)
-                return
-            elif text == "🌐 Browser":
-                result = await handler.process_message(chat_id, "Browser operations")
-                await self._send_response(chat_id, result, self.BROWSER_KEYBOARD)
-                return
-            elif text == "📊 My Builds":
-                result = await handler.process_message(chat_id, "Show my builds")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🔗 Link Account":
-                result = await handler.process_message(chat_id, "Link my account")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "💻 Code":
-                result = await handler.process_message(chat_id, "Code generation skills")
-                await self._send_response(chat_id, result, self.CODE_KEYBOARD)
-                return
-            elif text == "🔍 Analysis":
-                result = await handler.process_message(chat_id, "Code analysis skills")
-                await self._send_response(chat_id, result, self.ANALYSIS_KEYBOARD)
-                return
-            elif text == "🛠️ DevOps":
-                result = await handler.process_message(chat_id, "DevOps skills")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "📝 Docs":
-                result = await handler.process_message(chat_id, "Documentation skills")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🧪 Testing":
-                result = await handler.process_message(chat_id, "Testing skills")
-                await self._send_response(chat_id, result)
-                return
-            elif text == "🌐 Open URL":
-                await self._open_url_input(chat_id)
-                return
-            elif text == "📸 Screenshot":
-                result = await get_browser_controller().take_screenshot()
-                await self._send_response(chat_id, {"text": result.message}, self.BROWSER_KEYBOARD)
-                return
-            elif text == "📄 Create File":
-                self.user_sessions[chat_id] = {"action": "create_file"}
-                await self._send_response(chat_id, {"text": "📄 <b>Create File</b>\n\nSend: filename.txt:content"}, self.FILE_KEYBOARD)
-                return
-            elif text == "📖 Read File":
-                self.user_sessions[chat_id] = {"action": "read_file"}
-                await self._send_response(chat_id, {"text": "📖 <b>Read File</b>\n\nSend the file path:"}, self.FILE_KEYBOARD)
-                return
+            from app.integrations.telegram_bridge import get_telegram_bridge
+            bridge = get_telegram_bridge()
             
-            # Default: Send ALL text to AI brain via agent_handler
-            result = await handler.process_message(chat_id, text)
-            await self._send_response(chat_id, result)
+            result = await bridge.process_telegram_message(chat_id, text)
+            
+            keyboard = result.get("keyboard") or self.MAIN_KEYBOARD
+            parse_mode = result.get("parse_mode")
+            
+            await update.message.reply_text(
+                text=result["text"],
+                reply_markup=keyboard,
+                parse_mode=parse_mode
+            )
+            
+            action = result.get("action")
+            if action == "restart":
+                logger.info("Restart action triggered")
+            elif action == "shutdown":
+                logger.info("Shutdown action triggered")
                 
         except Exception as e:
-            logger.error(f"Text handling failed: {e}")
-            await update.message.reply_text(f"❌ Error: {str(e)}")
+            logger.error(f"Text handling failed: {e}", exc_info=True)
+            await update.message.reply_text(
+                f"❌ <b>Error</b>\n\n{str(e)}",
+                reply_markup=self.MAIN_KEYBOARD,
+                parse_mode="HTML"
+            )
     
     async def _send_response(self, chat_id: int, result: Dict, buttons=None):
         """Send response with optional buttons"""

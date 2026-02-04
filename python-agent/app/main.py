@@ -266,6 +266,19 @@ async def startup_event():
         init_memory_system()
         logger.info("Persistent memory system initialized")
         
+        # Test Ollama connection
+        try:
+            from app.integrations.ollama import get_ollama_client
+            ollama = get_ollama_client()
+            health = await ollama.health_check()
+            logger.info(f"Ollama health check: {health}")
+            if health.get("local"):
+                logger.info(f"✅ Ollama Local connected: {health.get('models', [])}")
+            if health.get("cloud"):
+                logger.info("✅ Ollama Cloud connected")
+        except Exception as e:
+            logger.error(f"Ollama connection failed: {e}")
+        
         # Initialize and start Telegram bot
         logger.info("Initializing Telegram bot...")
         await init_telegram_bot()
@@ -278,7 +291,9 @@ async def startup_event():
         await notify_admin_on_startup()
         logger.info("Startup notification sent")
         
-        logger.info("All startup tasks completed successfully")
+        logger.info("=" * 60)
+        logger.info("🚀 ULTIMATE CODING AGENT STARTED SUCCESSFULLY")
+        logger.info("=" * 60)
         
     except Exception as e:
         logger.error("Startup initialization failed", error=str(e), exc_info=True)
