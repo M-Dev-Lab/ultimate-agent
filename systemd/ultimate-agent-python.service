@@ -1,0 +1,34 @@
+[Unit]
+Description=Ultimate Agent (Python) - FastAPI + Telegram
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zeds
+Group=zeds
+WorkingDirectory=/home/zeds/Desktop/ultimate-agent/python-agent
+# Use the virtualenv Python to run uvicorn
+ExecStart=/home/zeds/Desktop/ultimate-agent/python-agent/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/zeds/Desktop/ultimate-agent/python-agent/.env
+SyslogIdentifier=ultimate-agent-python
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=80%
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/zeds/Desktop/ultimate-agent/python-agent/data /home/zeds/Desktop/ultimate-agent/python-agent/workspaces /home/zeds/Desktop/ultimate-agent/python-agent/logs
+
+[Install]
+WantedBy=multi-user.target
+Alias=ultimate-agent-python.service

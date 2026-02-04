@@ -210,49 +210,118 @@ Just send any coding request!`, { parse_mode: 'Markdown', ...this.getMainMenuBut
     });
 
     // Development Commands
-    this.bot.action('cmd_build', (ctx) => {
-      ctx.answerCbQuery();
-      ctx.reply(`🏗️ *Build Command*
+    this.bot.action('cmd_build', async (ctx) => {
+      ctx.answerCbQuery('🏗️ Building project...');
+      await ctx.sendChatAction('typing');
+      
+      try {
+        const agentAPI = process.env.AGENT_API_URL || 'http://localhost:8000/api';
+        const userId = ctx.from?.id;
+        
+        const response = await fetch(`${agentAPI}/build/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            goal: 'Create a new Python FastAPI project with authentication',
+            stack: 'python/fastapi',
+            auto_fix: false
+          })
+        });
 
-*Usage:* \`/build <project description>\`
-
-*Examples:*
-• \`/build Create a React login form\`
-• \`/build Python FastAPI REST API\`
-• \`/build Next.js e-commerce site\`
-
-Just describe what you want and I'll create the complete project!`,
-        { parse_mode: 'Markdown', ...this.getBackButton() });
+        if (response.ok) {
+          const data = await response.json();
+          const result = data.result || data.message || JSON.stringify(data);
+          
+          // Split long messages
+          if (result.length > 4000) {
+            const chunks = result.match(/[\s\S]{1,4000}/g) || [];
+            for (const chunk of chunks) {
+              await ctx.reply(chunk, { parse_mode: 'Markdown', ...this.getBackButton() });
+            }
+          } else {
+            await ctx.reply(result, { parse_mode: 'Markdown', ...this.getBackButton() });
+          }
+        } else {
+          await ctx.reply('❌ Build failed. Make sure Python agent is running: `./start-agent.sh`', { parse_mode: 'Markdown', ...this.getBackButton() });
+        }
+      } catch (error: any) {
+        await ctx.reply(`❌ Agent connection error: ${error.message}\n\nMake sure to run: \`./start-agent.sh\``, { parse_mode: 'Markdown', ...this.getBackButton() });
+      }
     });
 
-    this.bot.action('cmd_code', (ctx) => {
-      ctx.answerCbQuery();
-      ctx.reply(`💻 *Code Command*
+    this.bot.action('cmd_code', async (ctx) => {
+      ctx.answerCbQuery('💻 Generating code...');
+      await ctx.sendChatAction('typing');
+      
+      try {
+        const agentAPI = process.env.AGENT_API_URL || 'http://localhost:8000/api';
+        const userId = ctx.from?.id;
+        
+        const response = await fetch(`${agentAPI}/build/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            goal: 'Generate a TypeScript function to validate email addresses',
+            stack: 'typescript/nodejs',
+            auto_fix: false
+          })
+        });
 
-*Usage:* \`/code <request>\`
-
-*Examples:*
-• \`/code Create a TypeScript interface for User\`
-• \`/code Write a Python function to validate email\`
-• \`/code Generate SQL query for users table\`
-
-I'll generate clean, production-ready code!`,
-        { parse_mode: 'Markdown', ...this.getBackButton() });
+        if (response.ok) {
+          const data = await response.json();
+          const result = data.result || data.message || JSON.stringify(data);
+          
+          if (result.length > 4000) {
+            const chunks = result.match(/[\s\S]{1,4000}/g) || [];
+            for (const chunk of chunks) {
+              await ctx.reply(chunk, { parse_mode: 'Markdown', ...this.getBackButton() });
+            }
+          } else {
+            await ctx.reply(result, { parse_mode: 'Markdown', ...this.getBackButton() });
+          }
+        } else {
+          await ctx.reply('❌ Code generation failed. Make sure Python agent is running: `./start-agent.sh`', { parse_mode: 'Markdown', ...this.getBackButton() });
+        }
+      } catch (error: any) {
+        await ctx.reply(`❌ Agent connection error: ${error.message}\n\nMake sure to run: \`./start-agent.sh\``, { parse_mode: 'Markdown', ...this.getBackButton() });
+      }
     });
 
-    this.bot.action('cmd_fix', (ctx) => {
-      ctx.answerCbQuery();
-      ctx.reply(`🔧 *Fix Command*
+    this.bot.action('cmd_fix', async (ctx) => {
+      ctx.answerCbQuery('🔧 Analyzing issue...');
+      await ctx.sendChatAction('typing');
+      
+      try {
+        const agentAPI = process.env.AGENT_API_URL || 'http://localhost:8000/api';
+        const userId = ctx.from?.id;
+        
+        const response = await fetch(`${agentAPI}/analysis/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_name: 'debug-project',
+            analysis_types: ['quality', 'security']
+          })
+        });
 
-*Usage:* \`/fix <error or issue>\`
-
-*Examples:*
-• \`/fix TypeScript error in auth.ts\`
-• \`/fix Python ImportError\`
-• \`/fix CSS layout broken on mobile\`
-
-Paste the error or describe the issue!`,
-        { parse_mode: 'Markdown', ...this.getBackButton() });
+        if (response.ok) {
+          const data = await response.json();
+          const result = data.result || data.message || JSON.stringify(data);
+          
+          if (result.length > 4000) {
+            const chunks = result.match(/[\s\S]{1,4000}/g) || [];
+            for (const chunk of chunks) {
+              await ctx.reply(chunk, { parse_mode: 'Markdown', ...this.getBackButton() });
+            }
+          } else {
+            await ctx.reply(result, { parse_mode: 'Markdown', ...this.getBackButton() });
+          }
+        } else {
+          await ctx.reply('❌ Analysis failed. Make sure Python agent is running: `./start-agent.sh`', { parse_mode: 'Markdown', ...this.getBackButton() });
+        }
+      } catch (error: any) {
+        await ctx.reply(`❌ Agent connection error: ${error.message}\n\nMake sure to run: \`./start-agent.sh\``, { parse_mode: 'Markdown', ...this.getBackButton() });
+      }
     });
 
     // System Commands
@@ -1039,15 +1108,57 @@ Just describe what you want - I'll understand!`,
       console.log(`📨 Telegram message:`, messageText.substring(0, 50));
 
       try {
-        if (this.agent && typeof this.agent.handleMessage === 'function') {
-          await this.agent.handleMessage(agentMsg);
+        await ctx.sendChatAction('typing');
+        
+        // Call Python agent API
+        const agentAPI = process.env.AGENT_API_URL || 'http://localhost:8000/api';
+        
+        // Try build API first
+        const response = await fetch(`${agentAPI}/build/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            goal: messageText,
+            auto_fix: messageText.toLowerCase().includes('fix'),
+            stack: 'auto'
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const result = data.result || data.message || JSON.stringify(data);
+          
+          // Split long messages
+          if (result.length > 4000) {
+            const chunks = result.match(/[\s\S]{1,4000}/g) || [];
+            for (const chunk of chunks) {
+              await ctx.reply(chunk, { parse_mode: 'Markdown', ...this.getMainMenuButtons() });
+            }
+          } else {
+            await ctx.reply(result, { parse_mode: 'Markdown', ...this.getMainMenuButtons() });
+          }
         } else {
-          ctx.reply('⚠️ Agent not ready. Try /build or /status commands.', 
-            { ...this.getMainMenuButtons() });
+          // Fallback: try to use Agent if available
+          if (this.agent && typeof this.agent.handleMessage === 'function') {
+            await this.agent.handleMessage(agentMsg);
+          } else {
+            await ctx.reply('❌ Python Agent not responding. Make sure to run: `./start-agent.sh`\n\nOr use the buttons above!', 
+              { parse_mode: 'Markdown', ...this.getMainMenuButtons() });
+          }
         }
       } catch (error: any) {
         console.error('Error handling message:', error);
-        ctx.reply(`❌ Error: ${error.message}`, { ...this.getMainMenuButtons() });
+        
+        // Fallback to Agent
+        if (this.agent && typeof this.agent.handleMessage === 'function') {
+          try {
+            await this.agent.handleMessage(agentMsg);
+          } catch (agentError: any) {
+            await ctx.reply(`❌ Error: ${agentError.message}`, { ...this.getMainMenuButtons() });
+          }
+        } else {
+          await ctx.reply(`❌ Connection error: ${error.message}\n\nMake sure Python agent is running!`, { ...this.getMainMenuButtons() });
+        }
       }
     });
   }

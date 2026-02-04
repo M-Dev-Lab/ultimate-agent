@@ -29,7 +29,7 @@ from app.models.schemas import (
     BuildHistoryResponse,
     ErrorResponse,
 )
-from app.security.auth import get_current_user
+from app.security.auth import get_current_user_or_default
 from typing import Dict, Any
 User = Dict[str, Any]
 from app.security.validators import SecurityValidator
@@ -67,36 +67,35 @@ class BuildService:
             ValueError: If validation fails
         """
         # Validate inputs
-        self.validator.sanitize_project_name(request.project_name)
+        project_name = request.name or "auto-generated-project"
+        self.validator.sanitize_project_name(project_name)
         self.validator.sanitize_goal(request.goal)
 
         # Generate unique task ID
         task_id = str(uuid.uuid4())
 
-        # Create task record
-        build_status = BuildStatus(
-            task_id=task_id,
-            project_name=request.project_name,
-            status="initializing",
-            progress=0,
-            created_at=datetime.utcnow(),
-            created_by=user.username,
-            goal=request.goal,
-            parameters=request.parameters or {},
-        )
+        # Store minimal task info
+        _build_tasks[task_id] = {
+            "task_id": task_id,
+            "project_name": project_name,
+            "goal": request.goal,
+            "status": "initializing",
+            "progress": 0,
+            "created_at": datetime.utcnow(),
+            "created_by": user.get('sub', 'unknown'),
+        }
 
-        # Store task
-        _build_tasks[task_id] = build_status
-        if user.username not in _user_builds:
-            _user_builds[user.username] = []
-        _user_builds[user.username].append(task_id)
+        # Store task in user's list
+        if user.get('sub', 'unknown') not in _user_builds:
+            _user_builds[user.get('sub', 'unknown')] = []
+        _user_builds[user.get('sub', 'unknown')].append(task_id)
 
         logger.info(
             "Build task created",
             extra={
                 "task_id": task_id,
-                "user": user.username,
-                "project": request.project_name,
+                "user": user.get('sub', 'unknown'),
+                "project": project_name,
             },
         )
 
@@ -104,6 +103,8 @@ class BuildService:
             task_id=task_id,
             status="initializing",
             message="Build task created successfully",
+            created_at=datetime.utcnow(),
+            workspace_path=f"/tmp/workspace/{task_id}"
         )
 
     async def get_build_status(self, task_id: str, user: User) -> BuildStatusResponse:
@@ -129,7 +130,7 @@ class BuildService:
         task = _build_tasks[task_id]
 
         # Authorization: user can only view their own builds
-        if task.created_by != user.username and user.role != "admin":
+        if task.created_by != user.get('sub', 'unknown') and user.role != "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to view this build",
@@ -163,7 +164,7 @@ class BuildService:
         """
         limit = min(limit, 100)  # Cap at 100
 
-        user_task_ids = _user_builds.get(user.username, [])
+        user_task_ids = _user_builds.get(user.get('sub', 'unknown'), [])
         tasks = [_build_tasks[tid] for tid in user_task_ids if tid in _build_tasks]
 
         # Sort by creation time, newest first
@@ -216,7 +217,7 @@ class BuildService:
         task = _build_tasks[task_id]
 
         # Authorization check
-        if task.created_by != user.username and user.role != "admin":
+        if task.created_by != user.get('sub', 'unknown') and user.role != "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to cancel this build",
@@ -235,7 +236,7 @@ class BuildService:
 
         logger.info(
             "Build task cancelled",
-            extra={"task_id": task_id, "user": user.username},
+            extra={"task_id": task_id, "user": user.get('sub', 'unknown')},
         )
 
         return {"message": "Build task cancelled successfully"}
@@ -247,7 +248,7 @@ class BuildService:
 @router.post("/", response_model=BuildResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_build(
     request: BuildRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     settings: Settings = Depends(get_settings),
     background_tasks: BackgroundTasks = None,
 ):
@@ -278,7 +279,7 @@ async def create_build(
         # Schedule actual build execution (Phase 2: use Celery)
         if background_tasks:
             background_tasks.add_task(
-                execute_build_async, response.task_id, user.username
+                execute_build_async, response.task_id, user.get('sub', 'unknown')
             )
 
         return response
@@ -286,7 +287,7 @@ async def create_build(
     except ValueError as e:
         logger.warning(
             "Build creation validation error",
-            extra={"error": str(e), "user": user.username},
+            extra={"error": str(e), "user": user.get('sub', 'unknown')},
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -295,7 +296,7 @@ async def create_build(
     except Exception as e:
         logger.error(
             "Build creation error",
-            extra={"error": str(e), "user": user.username},
+            extra={"error": str(e), "user": user.get('sub', 'unknown')},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -306,7 +307,7 @@ async def create_build(
 @router.get("/{task_id}", response_model=BuildStatusResponse)
 async def get_build_status(
     task_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -350,7 +351,7 @@ async def get_build_status(
 
 @router.get("/", response_model=BuildHistoryResponse)
 async def get_build_history(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     settings: Settings = Depends(get_settings),
@@ -381,7 +382,7 @@ async def get_build_history(
     except Exception as e:
         logger.error(
             "Error fetching build history",
-            extra={"user": user.username, "error": str(e)},
+            extra={"user": user.get('sub', 'unknown'), "error": str(e)},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -392,7 +393,7 @@ async def get_build_history(
 @router.delete("/{task_id}", response_model=Dict)
 async def cancel_build(
     task_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -417,7 +418,7 @@ async def cancel_build(
     except Exception as e:
         logger.error(
             "Error cancelling build",
-            extra={"task_id": task_id, "user": user.username, "error": str(e)},
+            extra={"task_id": task_id, "user": user.get('sub', 'unknown'), "error": str(e)},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

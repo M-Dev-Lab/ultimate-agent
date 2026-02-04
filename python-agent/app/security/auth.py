@@ -5,8 +5,9 @@ JWT-based authentication with role-based access control
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional as TypingOptional
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import secrets
@@ -121,6 +122,38 @@ async def get_current_user(
     token = credentials.credentials
     payload = TokenManager.verify_token(token)
     return payload
+
+
+async def get_current_user_or_default(
+    authorization: TypingOptional[str] = Header(None),
+) -> Dict[str, Any]:
+    """
+    Optional authentication - returns default user in development mode or with valid token
+    """
+    from app.core.config import settings
+    
+    # Try to verify token from Authorization header
+    if authorization:
+        try:
+            if authorization.startswith("Bearer "):
+                token = authorization[7:]
+                payload = TokenManager.verify_token(token)
+                return payload
+        except Exception:
+            pass
+    
+    # In development mode, return a default user
+    if settings.environment == "development":
+        return {
+            "sub": "telegram-bot",
+            "permissions": ["build", "analysis", "memory"],
+            "type": "bot"
+        }
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+    )
 
 
 async def require_admin(

@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     enable_monitoring: bool = True
     enable_rate_limiting: bool = True
 
+    # If true, the Python agent will initialize and run the Telegram bot on startup.
+    # This prevents duplicate Telegram bots when both Node.js and Python implementations exist.
+    use_python_telegram: bool = False
+
     @field_validator("jwt_secret")
     @classmethod
     def validate_jwt_secret(cls, v):

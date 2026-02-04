@@ -59,7 +59,7 @@ from app.models.schemas import ErrorResponse
 from app.api import build_router, analysis_router, health_router, websocket_router, memory_router
 from app.db.session import init_db, close_db
 from app.memory import init_memory_system, shutdown_memory_system
-from app.integrations.telegram_bot import init_telegram_bot, start_telegram_bot, stop_telegram_bot, notify_admin_on_startup
+# Telegram bot is now handled by Node.js (src/telegram.ts)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -216,28 +216,30 @@ async def health_check():
 
 
 # ==================== Telegram Webhook Endpoint ====================
-
-@app.post("/telegram/webhook", tags=["Telegram"])
-async def telegram_webhook(request: Request):
-    """Handle Telegram webhook updates"""
-    from telegram import Update
-    from app.integrations.telegram_bot import get_telegram_bot
-    
-    bot = get_telegram_bot()
-    if not bot.application:
-        return {"status": "ok", "message": "Bot not initialized"}
-    
-    try:
-        data = await request.json()
-        update = Update.de_json(data, bot.application.bot)
-        await bot.application.process_update(update)
-    except KeyError as e:
-        # Handle missing fields in test data
-        logger.warning(f"Telegram webhook missing field: {e}")
-    except Exception as e:
-        logger.error(f"Telegram webhook error: {e}")
-    
-    return {"status": "ok"}
+# DISABLED: Using Node.js Telegram bot instead (src/telegram.ts)
+# The Node.js bot handles all Telegram interactions
+# 
+# @app.post("/telegram/webhook", tags=["Telegram"])
+# async def telegram_webhook(request: Request):
+#     """Handle Telegram webhook updates"""
+#     from telegram import Update
+#     from app.integrations.telegram_bot import get_telegram_bot
+#     
+#     bot = get_telegram_bot()
+#     if not bot.application:
+#         return {"status": "ok", "message": "Bot not initialized"}
+#     
+#     try:
+#         data = await request.json()
+#         update = Update.de_json(data, bot.application.bot)
+#         await bot.application.process_update(update)
+#     except KeyError as e:
+#         # Handle missing fields in test data
+#         logger.warning(f"Telegram webhook missing field: {e}")
+#     except Exception as e:
+#         logger.error(f"Telegram webhook error: {e}")
+#     
+#     return {"status": "ok"}
 
 
 # ==================== Ready for Route Imports ====================
@@ -279,20 +281,23 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Ollama connection failed: {e}")
         
-        # Initialize and start Telegram bot
-        logger.info("Initializing Telegram bot...")
-        await init_telegram_bot()
-        logger.info("Telegram bot initialized, starting...")
-        await start_telegram_bot()
-        logger.info("Telegram bot started")
-        
-        # Send startup notification to admin
-        logger.info("Sending startup notification to admin...")
-        await notify_admin_on_startup()
-        logger.info("Startup notification sent")
+        # Initialize and start Telegram bot (Python) if configured
+        if settings.use_python_telegram:
+            logger.info("Initializing Python Telegram bot...")
+            await init_telegram_bot()
+            logger.info("Telegram bot initialized, starting...")
+            await start_telegram_bot()
+            logger.info("Telegram bot started")
+
+            # Send startup notification to admin
+            logger.info("Sending startup notification to admin...")
+            await notify_admin_on_startup()
+            logger.info("Startup notification sent to admin")
+        else:
+            logger.info("Python Telegram bot disabled (set USE_PYTHON_TELEGRAM=true to enable).")
         
         logger.info("=" * 60)
-        logger.info("🚀 ULTIMATE CODING AGENT STARTED SUCCESSFULLY")
+        logger.info("� ULTIMATE CODING AGENT STARTED SUCCESSFULLY")
         logger.info("=" * 60)
         
     except Exception as e:

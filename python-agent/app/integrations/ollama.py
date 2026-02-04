@@ -114,8 +114,12 @@ class OllamaClient:
         model: Optional[str] = None,
         **kwargs
     ) -> str:
-        """Chat with cloud-first fallback"""
+        """
+        Chat with cloud-first fallback to local
+        FIXED: Robust response parsing for multiple formats
+        """
         
+        # Try cloud first if configured
         if self.is_cloud:
             try:
                 headers = {"Authorization": f"Bearer {self.ollama_api_key.get_secret_value()}"}
@@ -127,14 +131,35 @@ class OllamaClient:
                 }
                 
                 result = await self._call_ollama(self.ollama_host, data, headers)
-                return self._extract_response(result)
+                content = self._extract_response(result)
                 
+                if content:
+                    logger.info(f"✅ Cloud chat success: {len(content)} chars")
+                    return content
+                else:
+                    logger.warning(f"⚠️ No content extracted from cloud response")
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 401, 403):
+                    logger.warning(f"⚠️ Cloud quota/rate limit ({e.response.status_code}), falling back...")
+                else:
+                    logger.warning(f"⚠️ Cloud error: {e.response.status_code}, falling back...")
             except Exception as e:
-                logger.warning(f"Cloud chat failed: {e}, using local...")
+                logger.warning(f"⚠️ Cloud chat failed: {e}, falling back to local...")
         
-        # Fallback to local
+        # Fallback to local (or primary if cloud disabled)
+        return await self._chat_local(messages, model, **kwargs)
+    
+    async def _chat_local(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """Generate using local Ollama - FIXED RESPONSE PARSING"""
         try:
             local_model = model or self.local_model
+            
             data = {
                 "model": local_model,
                 "messages": messages,
@@ -143,33 +168,86 @@ class OllamaClient:
             }
             
             result = await self._call_ollama(self.local_host, data)
-            return self._extract_response(result)
+            content = self._extract_response(result)
+            
+            if not content:
+                logger.error(f"❌ No content in local response: {result}")
+                raise Exception("Local Ollama returned empty response")
+            
+            logger.info(f"✅ Local chat success: {len(content)} chars")
+            return content
             
         except Exception as e:
-            logger.error(f"All chat methods failed: {e}")
+            logger.error(f"❌ Local chat failed: {e}")
             raise Exception(f"Unable to get AI response: {e}")
     
     def _extract_response(self, result: Dict) -> str:
-        """Extract content from Ollama response"""
+        """
+        Extract content from Ollama response
+        Handles multiple response formats from different Ollama endpoints
+        
+        Formats supported:
+        1. Chat endpoint: {"message": {"content": "..."}}
+        2. Generate endpoint: {"response": "..."}
+        3. Alternative: {"output": "..."}
+        4. Streaming format remnant: {"text": "..."}
+        """
         try:
+            # Handle string responses (shouldn't happen, but be safe)
             if isinstance(result, str):
-                return result
+                return result.strip()
             
-            if "message" in result and isinstance(result["message"], dict):
-                return result["message"].get("content", str(result))
+            if not isinstance(result, dict):
+                logger.warning(f"Unexpected response type: {type(result)}")
+                return str(result)
             
+            # Format 1: Chat endpoint response (most common)
+            if "message" in result:
+                message = result["message"]
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if content:
+                        return content.strip()
+            
+            # Format 2: Generate endpoint response
             if "response" in result:
-                return result["response"]
+                response = result["response"]
+                if isinstance(response, str):
+                    return response.strip()
             
+            # Format 3: Alternative output field
             if "output" in result:
-                return result["output"]
+                output = result["output"]
+                if isinstance(output, str):
+                    return output.strip()
             
-            logger.warning(f"Unexpected Ollama response structure: {result.keys()}")
-            return str(result)
+            # Format 4: Text field (fallback)
+            if "text" in result:
+                text = result["text"]
+                if isinstance(text, str):
+                    return text.strip()
+            
+            # Format 5: Choices array (OpenAI-compatible)
+            if "choices" in result and isinstance(result["choices"], list):
+                for choice in result["choices"]:
+                    if isinstance(choice, dict):
+                        # Try message.content first
+                        if "message" in choice and "content" in choice["message"]:
+                            return choice["message"]["content"].strip()
+                        # Try text field
+                        if "text" in choice:
+                            return choice["text"].strip()
+            
+            # If we get here, log what we received for debugging
+            logger.warning(f"Could not extract response from: {list(result.keys())}")
+            logger.debug(f"Full response: {result}")
+            
+            # Return empty string instead of None
+            return ""
             
         except Exception as e:
-            logger.error(f"Response extraction failed: {e}")
-            return str(result)
+            logger.error(f"Response extraction exception: {e}, full result: {result}")
+            return ""
     
     async def embeddings(self, text: str, model: Optional[str] = None) -> List[float]:
         """Generate embeddings"""

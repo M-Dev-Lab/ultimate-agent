@@ -323,7 +323,7 @@ When responding to Telegram users:
         message: str,
         context: ConversationContext
     ) -> Dict[str, Any]:
-        """Send message to Ollama AI and get response"""
+        """Send message to Ollama AI and get response - FIXED"""
         try:
             history = context["conversation_history"][-10:]
             
@@ -332,17 +332,28 @@ When responding to Telegram users:
             messages.extend(history)
             messages.append({"role": "user", "content": message})
             
-            result = await self.ollama.chat(
-                messages=messages
-            )
+            # Call Ollama chat (returns string directly)
+            response_text = await self.ollama.chat(messages=messages)
             
-            response_text = result if isinstance(result, str) else result.get("response", str(result))
+            # Ensure we got a string
+            if not isinstance(response_text, str):
+                response_text = str(response_text)
             
+            if not response_text or not response_text.strip():
+                response_text = "I didn't get a response. Please try again."
+            
+            # Add to history
             context["conversation_history"].append({
                 "role": "assistant",
                 "content": response_text,
                 "timestamp": datetime.utcnow().isoformat()
             })
+            
+            logger.info(
+                "AI response generated",
+                user_id=user_id,
+                response_len=len(response_text)
+            )
             
             return {
                 "text": response_text,
@@ -350,9 +361,9 @@ When responding to Telegram users:
             }
             
         except Exception as e:
-            logger.error(f"AI processing failed: {e}")
+            logger.error(f"AI processing failed: {e}", exc_info=True)
             return {
-                "text": f"❌ AI Error: {str(e)}\n\nPlease try again or use the menu buttons.",
+                "text": f"❌ <b>AI Error</b>\n\n<code>{str(e)[:100]}</code>\n\nPlease try again or use the menu buttons.",
                 "error": str(e)
             }
     

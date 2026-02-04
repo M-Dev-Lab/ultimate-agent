@@ -19,7 +19,7 @@ from app.models.schemas import (
     CodeAnalysisResponse,
     ErrorResponse,
 )
-from app.security.auth import get_current_user
+from app.security.auth import get_current_user_or_default
 from typing import Dict, Any
 User = Dict[str, Any]
 from app.security.validators import SecurityValidator
@@ -66,7 +66,7 @@ class AnalysisService:
             analysis_id=analysis_id,
             project_name=request.project_name,
             timestamp=datetime.utcnow(),
-            performed_by=user.username,
+            performed_by=user.get('sub', 'unknown'),
             quality_score=8.5,
             security_issues=[],
             code_smells=5,
@@ -84,7 +84,7 @@ class AnalysisService:
             "Code analysis completed",
             extra={
                 "analysis_id": analysis_id,
-                "user": user.username,
+                "user": user.get('sub', 'unknown'),
                 "project": request.project_name,
             },
         )
@@ -95,7 +95,7 @@ class AnalysisService:
 @router.post("/", response_model=CodeAnalysisResponse, status_code=status.HTTP_202_ACCEPTED)
 async def analyze_code(
     request: CodeAnalysisRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -122,7 +122,7 @@ async def analyze_code(
     except ValueError as e:
         logger.warning(
             "Analysis validation error",
-            extra={"error": str(e), "user": user.username},
+            extra={"error": str(e), "user": user.get('sub', 'unknown')},
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -131,7 +131,7 @@ async def analyze_code(
     except Exception as e:
         logger.error(
             "Analysis error",
-            extra={"error": str(e), "user": user.username},
+            extra={"error": str(e), "user": user.get('sub', 'unknown')},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -142,7 +142,7 @@ async def analyze_code(
 @router.get("/{analysis_id}", response_model=CodeAnalysisResponse)
 async def get_analysis_result(
     analysis_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_default),
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -164,7 +164,7 @@ async def get_analysis_result(
     result = _analysis_results[analysis_id]
 
     # Authorization: user can view their own analyses or admins can view all
-    if result.performed_by != user.username and user.role != "admin":
+    if result.performed_by != user.get('sub', 'unknown') and user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this analysis",

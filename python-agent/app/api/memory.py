@@ -9,7 +9,7 @@ import logging
 from app.memory.persistent_memory import get_memory, MemoryFact
 from app.memory import get_memory_manager
 from app.agents.memory_enhanced import get_enhanced_agent
-from app.security.auth import get_current_user
+from app.security.auth import get_current_user_or_default
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
 @router.get("/status")
-async def get_memory_status(user: Dict[str, Any] = Depends(get_current_user)):
+async def get_memory_status(user: Dict[str, Any] = Depends(get_current_user_or_default)):
     """
     Get current memory system status
     
@@ -40,7 +40,7 @@ async def get_memory_status(user: Dict[str, Any] = Depends(get_current_user)):
 async def list_memory_facts(
     category: Optional[str] = Query(None, description="Filter by category"),
     min_confidence: float = Query(0.0, ge=0.0, le=1.0, description="Minimum confidence"),
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user_or_default)
 ) -> List[Dict[str, Any]]:
     """
     List all memory facts with optional filtering
@@ -71,7 +71,7 @@ async def add_memory_fact(
     category: str = Query(..., min_length=1),
     confidence: float = Query(0.5, ge=0.0, le=1.0),
     tags: Optional[List[str]] = Query(None),
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user_or_default)
 ) -> Dict[str, Any]:
     """
     Add a new fact to memory (Admin only)
@@ -113,7 +113,7 @@ async def add_memory_fact(
 @router.get("/facts/search")
 async def search_memory(
     query: str = Query(..., min_length=1),
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user_or_default)
 ) -> Dict[str, Any]:
     """
     Search memory for relevant facts (semantic search)
@@ -135,7 +135,7 @@ async def search_memory(
 
 
 @router.get("/rules")
-async def get_rules(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_rules(user: Dict[str, Any] = Depends(get_current_user_or_default)) -> Dict[str, Any]:
     """
     Get all active strict rules
     
@@ -156,7 +156,7 @@ async def get_rules(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[st
 async def add_rule(
     rule_content: str = Query(..., min_length=1),
     priority: str = Query("medium", pattern="^(critical|high|medium|low)$"),
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user_or_default)
 ) -> Dict[str, Any]:
     """
     Add a new rule to strict rules (Admin only)
@@ -190,7 +190,7 @@ async def add_rule(
 
 
 @router.post("/consolidate")
-async def consolidate_memory(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def consolidate_memory(user: Dict[str, Any] = Depends(get_current_user_or_default)) -> Dict[str, Any]:
     """
     Trigger memory consolidation (Admin only)
     
@@ -230,7 +230,7 @@ async def consolidate_memory(user: Dict[str, Any] = Depends(get_current_user)) -
 
 @router.get("/validation/status")
 async def get_validation_status(
-    user: Dict[str, Any] = Depends(get_current_user)
+    user: Dict[str, Any] = Depends(get_current_user_or_default)
 ) -> Dict[str, Any]:
     """
     Get rule validation status and recent violations
@@ -248,7 +248,7 @@ async def get_validation_status(
 
 
 @router.get("/analytics")
-async def get_memory_analytics(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_memory_analytics(user: Dict[str, Any] = Depends(get_current_user_or_default)) -> Dict[str, Any]:
     """
     Get memory analytics and insights
     
