@@ -2,24 +2,24 @@
   "skill_metrics": {
     "python-web-api": {
       "skill_name": "python-web-api",
-      "total_calls": 5,
-      "successful_calls": 5,
+      "total_calls": 7,
+      "successful_calls": 7,
       "failed_calls": 0,
       "avg_response_time_ms": 150.5,
-      "last_used": "2026-02-04T21:34:41.292944"
+      "last_used": "2026-02-04T21:55:45.435931"
     },
     "blog-post": {
       "skill_name": "blog-post",
-      "total_calls": 25,
-      "successful_calls": 25,
+      "total_calls": 35,
+      "successful_calls": 35,
       "failed_calls": 0,
       "avg_response_time_ms": 120.0,
-      "last_used": "2026-02-04T21:34:41.298926"
+      "last_used": "2026-02-04T21:55:45.441692"
     }
   },
   "daily_stats": {
     "2026-02-04": {
-      "messages": 1,
+      "messages": 6,
       "errors": 0,
       "avg_response_time": 0.0
     }

@@ -275,3 +275,22 @@ class AuditLog(Base):
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class WorkflowSession(Base):
+    """Persistence for interactive wizards and workflow states (Phase 4.1)"""
+    __tablename__ = "workflow_sessions"
+    __table_args__ = (
+        Index('idx_workflow_user', 'user_id'),
+        Index('idx_workflow_status', 'state'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    state = Column(String(100), nullable=False)  # Maps to WorkflowState.value
+    data = Column(JSON, default=dict, nullable=False)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
