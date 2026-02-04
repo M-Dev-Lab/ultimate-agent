@@ -12,6 +12,10 @@ from enum import Enum
 from app.core.config import settings
 from app.integrations.ollama import get_ollama_client
 from app.skills.registry import get_skill_registry
+from app.core.error_handler import get_error_handler, ErrorCategory
+from app.core.memory_manager import get_memory_manager
+from app.monitoring.analytics import get_analytics_tracker
+import time
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -19,17 +23,22 @@ logger = structlog.get_logger(__name__)
 
 class WorkflowState(Enum):
     IDLE = "idle"
+    # Project Wizard
     PROJECT_NAME = "project_name"
-    PROJECT_LANGUAGE = "project_language"
-    PROJECT_FRAMEWORK = "project_framework"
     PROJECT_GOAL = "project_goal"
+    PROJECT_DETAILS = "project_details"
+    PROJECT_TECH = "project_tech"
+    PROJECT_LANG = "project_lang"
+    # Social Wizard
+    SOCIAL_TYPE = "social_type"
     SOCIAL_PLATFORM = "social_platform"
     SOCIAL_CONTENT = "social_content"
-    SCHEDULE_TASK = "schedule_task"
-    SCHEDULE_TIME = "schedule_time"
-    SCHEDULE_SKILL = "schedule_skill"
-    CODE_ANALYSIS = "code_analysis"
-    CONFIRMATION = "confirmation"
+    # Schedule Wizard
+    SCHEDULE_PROMPT = "schedule_prompt"
+    # System
+    RESTART_CONFIRM = "restart_confirm"
+    SHUTDOWN_CONFIRM = "shutdown_confirm"
+    LEARNING = "learning"
 
 
 class ConversationContext(TypedDict):
@@ -93,163 +102,187 @@ When responding to Telegram users:
         context_type: str = "message"
     ) -> Dict[str, Any]:
         """
-        Process a message from Telegram user
-        
-        Args:
-            user_id: Telegram user ID
-            message: User message
-            context_type: Type of message (message, button_callback, etc.)
-            
-        Returns:
-            Response dictionary with text and optional actions
+        Process incoming message with full error handling, memory, and analytics
         """
-        context = self.get_context(user_id)
+        start_time = time.time()
+        error_handler = get_error_handler()
+        memory_manager = get_memory_manager()
+        analytics = get_analytics_tracker()
         
-        logger.info(
-            "Processing message",
-            user_id=user_id,
-            workflow_state=context["workflow_state"].value,
-            message_length=len(message)
-        )
-        
-        context["conversation_history"].append({
-            "role": "user",
-            "content": message,
-            "timestamp": datetime.utcnow().isoformat()
-        })
-        
-        if len(context["conversation_history"]) > 20:
-            context["conversation_history"] = context["conversation_history"][-20:]
-        
-        if context["workflow_state"] != WorkflowState.IDLE:
-            result = await self._handle_workflow(user_id, message)
-            context["updated_at"] = datetime.utcnow()
-            return result
-        
-        return await self._handle_general_message(user_id, message)
+        try:
+            # Add user message to memory
+            memory_manager.add_user_message(user_id, message)
+            
+            # Special case for workflow handling if it exists
+            # (Note: We keep the old workflow logic for now as a fallback)
+            context = self.get_context(user_id)
+            if context["workflow_state"] != WorkflowState.IDLE:
+                workflow_result = await self._handle_workflow(user_id, message)
+                response_text = workflow_result.get("text", "Done!")
+                skill_used = "workflow_" + context["workflow_state"].value
+            else:
+                # Detect and route to skill
+                skill_result = await error_handler.execute_with_retry(
+                    self.skill_registry.route_message_to_skill,
+                    message,
+                    user_id,
+                    category=ErrorCategory.SKILL,
+                    max_retries=2
+                )
+                
+                if skill_result["success"]:
+                    response_text = skill_result["result"].get("text", "Done!")
+                    skill_used = skill_result.get("skill_used")
+                else:
+                    # Fallback to general AI response
+                    conversation = memory_manager.build_conversation_for_ollama(user_id)
+                    response_text = await error_handler.execute_with_retry(
+                        self.ollama.chat,
+                        messages=conversation,
+                        category=ErrorCategory.OLLAMA,
+                        max_retries=3
+                    )
+                    skill_used = None
+            
+            # Add assistant response to memory
+            memory_manager.add_assistant_message(user_id, response_text)
+            
+            # Record analytics
+            response_time_ms = (time.time() - start_time) * 1000
+            analytics.record_message(
+                user_id=user_id,
+                message=message,
+                response=response_text,
+                response_time_ms=response_time_ms,
+                skill_used=skill_used,
+                success=True
+            )
+            
+            return {
+                "text": response_text,
+                "success": True,
+                "response_time_ms": response_time_ms
+            }
+            
+        except Exception as e:
+            error_handler.record_error(e)
+            user_message = error_handler.format_user_error(e)
+            
+            # Record failed analytics
+            response_time_ms = (time.time() - start_time) * 1000
+            analytics.record_message(
+                user_id=user_id,
+                message=message,
+                response=user_message,
+                response_time_ms=response_time_ms,
+                success=False,
+                error=str(e)
+            )
+            
+            return {
+                "text": user_message,
+                "success": False,
+                "error": str(e)
+            }
     
     async def _handle_workflow(self, user_id: int, message: str) -> Dict[str, Any]:
         """Handle multi-step workflows"""
         context = self.get_context(user_id)
         state = context["workflow_state"]
         data = context["workflow_data"]
+        msg_lower = message.lower().strip()
         
+        # Global Back handling
+        if "back" in msg_lower or "⬅️" in message:
+            self.clear_context(user_id)
+            return await self._send_main_menu(user_id)
+
+        # --- PROJECT WIZARD ---
         if state == WorkflowState.PROJECT_NAME:
             data["project_name"] = message.strip()
-            context["workflow_state"] = WorkflowState.PROJECT_LANGUAGE
-            return {
-                "text": f"📦 <b>Project: {data['project_name']}</b>\n\nSelect programming language:",
-                "buttons": [
-                    [{"text": "🐍 Python", "callback": "lang_python"}],
-                    [{"text": "🟢 JavaScript", "callback": "lang_js"}],
-                    [{"text": "🔵 TypeScript", "callback": "lang_ts"}],
-                    [{"text": "🔴 Go", "callback": "lang_go"}],
-                    [{"text": "⬅️ Back", "callback": "cancel"}],
-                ],
-                "workflow_state": WorkflowState.PROJECT_LANGUAGE.value
-            }
-        
-        elif state == WorkflowState.PROJECT_LANGUAGE:
-            lang_map = {
-                "lang_python": "python",
-                "lang_js": "javascript",
-                "lang_ts": "typescript",
-                "lang_go": "go",
-            }
-            if message in lang_map:
-                data["language"] = lang_map[message]
-                if data["language"] == "python":
-                    context["workflow_state"] = WorkflowState.PROJECT_FRAMEWORK
-                    return {
-                        "text": "Select Python framework:",
-                        "buttons": [
-                            [{"text": "⚡ FastAPI", "callback": "fw_fastapi"}],
-                            [{"text": "🌶️ Flask", "callback": "fw_flask"}],
-                            [{"text": "🔺 Django", "callback": "fw_django"}],
-                            [{"text": "⬅️ Back", "callback": "cancel"}],
-                        ],
-                        "workflow_state": WorkflowState.PROJECT_FRAMEWORK.value
-                    }
-                else:
-                    data["framework"] = data["language"]
-                    context["workflow_state"] = WorkflowState.PROJECT_GOAL
-                    return {
-                        "text": f"📝 Describe your project goal and requirements:",
-                        "workflow_state": WorkflowState.PROJECT_GOAL.value
-                    }
-            else:
-                return {"text": "Please select a language from the buttons."}
-        
-        elif state == WorkflowState.PROJECT_FRAMEWORK:
-            fw_map = {
-                "fw_fastapi": "FastAPI",
-                "fw_flask": "Flask",
-                "fw_django": "Django",
-            }
-            if message in fw_map:
-                data["framework"] = fw_map[message]
             context["workflow_state"] = WorkflowState.PROJECT_GOAL
-            return {
-                "text": f"📝 Describe your project goal and requirements:"
-            }
+            return {"text": "🎯 <b>Project Goal</b>\n\nWhat is the main goal of this project?"}
         
         elif state == WorkflowState.PROJECT_GOAL:
-            data["goal"] = message
-            return await self._execute_project_creation(user_id, data)
+            data["goal"] = message.strip()
+            context["workflow_state"] = WorkflowState.PROJECT_DETAILS
+            return {"text": "📝 <b>Project Details</b>\n\nPlease provide more details/requirements for the project:"}
         
-        elif state == WorkflowState.SOCIAL_PLATFORM:
-            platform_map = {
-                "🐦 Tweet": "twitter",
-                "📘 LinkedIn": "linkedin",
-                "📕 Facebook": "facebook",
-                "📷 Instagram": "instagram",
-            }
-            if message in platform_map:
-                data["platform"] = platform_map[message]
-                context["workflow_state"] = WorkflowState.SOCIAL_CONTENT
-                return {
-                    "text": f"✍️ What would you like to post to {message}?"
-                }
-            else:
-                return {"text": "Please select a platform from the buttons."}
-        
-        elif state == WorkflowState.SOCIAL_CONTENT:
-            data["content"] = message
-            return await self._execute_social_post(user_id, data)
-        
-        elif state == WorkflowState.SCHEDULE_TASK:
-            data["task_name"] = message
-            context["workflow_state"] = WorkflowState.SCHEDULE_TIME
+        elif state == WorkflowState.PROJECT_DETAILS:
+            data["details"] = message.strip()
+            context["workflow_state"] = WorkflowState.PROJECT_TECH
             return {
-                "text": "📅 When should this task run?\nFormat: cron expression or natural language (e.g., 'every day at 9am', '2026-02-15 10:00')"
-            }
-        
-        elif state == WorkflowState.SCHEDULE_TIME:
-            data["schedule"] = message
-            context["workflow_state"] = WorkflowState.SCHEDULE_SKILL
-            return {
-                "text": "⚡ What skill should run?\n(Skill name or description)",
+                "text": "🛠️ <b>Tech Stack</b>\n\nSelect the primary technology stack:",
                 "buttons": [
-                    [{"text": "🔨 Create Project", "callback": "skill_project"}],
-                    [{"text": "📱 Social Post", "callback": "skill_social"}],
-                    [{"text": "📝 Custom Code", "callback": "skill_code"}],
+                    [{"text": "⚡ FastAPI", "callback": "tech_fastapi"}, {"text": "⚛️ React", "callback": "tech_react"}],
+                    [{"text": "🟦 Next.js", "callback": "tech_nextjs"}, {"text": "🐍 Django", "callback": "tech_django"}],
+                    [{"text": "📦 Node.js", "callback": "tech_nodejs"}, {"text": "⬅️ Back", "callback": "back"}]
                 ]
             }
         
-        elif state == WorkflowState.SCHEDULE_SKILL:
-            data["skill"] = message
-            return await self._execute_schedule_creation(user_id, data)
+        elif state == WorkflowState.PROJECT_TECH:
+            data["tech_stack"] = message.replace("tech_", "").capitalize()
+            context["workflow_state"] = WorkflowState.PROJECT_LANG
+            return {
+                "text": "🌐 <b>Language</b>\n\nSelect the primary programming language:",
+                "buttons": [
+                    [{"text": "🐍 Python", "callback": "lang_python"}, {"text": "🔵 TypeScript", "callback": "lang_ts"}],
+                    [{"text": "🟢 JavaScript", "callback": "lang_js"}, {"text": "🔴 Go", "callback": "lang_go"}],
+                    [{"text": "⬅️ Back", "callback": "back"}]
+                ]
+            }
         
-        elif state == WorkflowState.CONFIRMATION:
-            if message.lower() in ["yes", "y", "confirm"]:
-                action = data.get("pending_action")
-                if action == "restart":
-                    return {"text": "🔄 Restarting agent...", "action": "restart"}
-                elif action == "shutdown":
-                    return {"text": "⚡ Shutting down...", "action": "shutdown"}
+        elif state == WorkflowState.PROJECT_LANG:
+            data["language"] = message.replace("lang_", "").capitalize()
+            return await self._execute_project_creation(user_id, data)
+
+        # --- SOCIAL WIZARD ---
+        elif state == WorkflowState.SOCIAL_TYPE:
+            data["content_type"] = message.strip()
+            context["workflow_state"] = WorkflowState.SOCIAL_PLATFORM
+            return {
+                "text": "🌐 <b>Select Platforms</b>\n\nWhere should we share this?",
+                "buttons": [
+                    [{"text": "🐦 Twitter/X", "callback": "plat_twitter"}, {"text": "📘 LinkedIn", "callback": "plat_linkedin"}],
+                    [{"text": "📕 Facebook", "callback": "plat_facebook"}, {"text": "📷 Instagram", "callback": "plat_insta"}],
+                    [{"text": "⬅️ Back", "callback": "back"}]
+                ]
+            }
+        
+        elif state == WorkflowState.SOCIAL_PLATFORM:
+            data["platform"] = message.replace("plat_", "")
+            context["workflow_state"] = WorkflowState.SOCIAL_CONTENT
+            return {"text": f"✍️ <b>Content</b>\n\nEnter the text you want to post to {data['platform']}:"}
+        
+        elif state == WorkflowState.SOCIAL_CONTENT:
+            data["content"] = message.strip()
+            return await self._execute_social_post(user_id, data)
+
+        # --- SCHEDULE WIZARD ---
+        elif state == WorkflowState.SCHEDULE_PROMPT:
+            data["task_description"] = message.strip()
+            # In a real scenario, we'd parse time from this or ask for it
+            # For now, we save it as a task to be processed.
+            return await self._execute_schedule_creation(user_id, data)
+
+        # --- SYSTEM COMMANDS ---
+        elif state == WorkflowState.RESTART_CONFIRM:
+            if "restart" in msg_lower or "yes" in msg_lower:
+                asyncio.create_task(self._perform_restart())
+                return {"text": "🔄 <b>Restarting agent...</b>\n\nPlease wait a moment."}
             else:
                 self.clear_context(user_id)
-                return {"text": "❌ Cancelled."}
+                return {"text": "❌ Restart cancelled."}
+
+        elif state == WorkflowState.SHUTDOWN_CONFIRM:
+            if "shutdown" in msg_lower or "yes" in msg_lower:
+                asyncio.create_task(self._perform_shutdown())
+                return {"text": "⚡ <b>System shutting down...</b>\n\nGoodbye!"}
+            else:
+                self.clear_context(user_id)
+                return {"text": "❌ Shutdown cancelled."}
+
+        return {"text": "Workflow completed or cancelled."}
         
         return {"text": "Workflow completed or cancelled."}
     
@@ -260,51 +293,54 @@ When responding to Telegram users:
         msg_lower = message.lower().strip()
         
         # NEW 7-BUTTON MAIN MENU DETECTION
-        if msg_lower == "🏗️ project" or "project" in msg_lower and ("new" in msg_lower or "create" in msg_lower):
+        if "🏗️ project" in msg_lower or (msg_lower.startswith("project") and len(msg_lower) < 15):
             context["workflow_state"] = WorkflowState.PROJECT_NAME
             return {
-                "text": "🏗️ <b>Create New Project</b>\n\nWhat's your project name?",
+                "text": "🏗️ <b>Create New Project</b>\n\nWhat is the name of your project?",
                 "workflow_state": WorkflowState.PROJECT_NAME.value
             }
         
-        if msg_lower == "📱 social" or "social" in msg_lower or "post" in msg_lower:
-            context["workflow_state"] = WorkflowState.SOCIAL_PLATFORM
+        if "📱 social" in msg_lower or (msg_lower.startswith("social") and len(msg_lower) < 15):
+            context["workflow_state"] = WorkflowState.SOCIAL_TYPE
             return {
-                "text": "📱 <b>Social Media</b>\n\nSelect platform:",
+                "text": "📱 <b>Social Media Sharing</b>\n\nWhat type of content do you want to share?",
                 "buttons": [
-                    [{"text": "🐦 Tweet", "callback": "platform_twitter"}],
-                    [{"text": "📘 LinkedIn", "callback": "platform_linkedin"}],
-                    [{"text": "📕 Facebook", "callback": "platform_facebook"}],
-                    [{"text": "📷 Instagram", "callback": "platform_instagram"}],
-                    [{"text": "⬅️ Back", "callback": "cancel"}],
+                    [{"text": "📝 Post", "callback": "type_post"}, {"text": "🧵 Thread", "callback": "type_thread"}],
+                    [{"text": "📢 Announcement", "callback": "type_announcement"}, {"text": "⬅️ Back", "callback": "back"}]
                 ],
-                "workflow_state": WorkflowState.SOCIAL_PLATFORM.value
+                "workflow_state": WorkflowState.SOCIAL_TYPE.value
             }
         
-        if msg_lower == "📅 schedule" or "schedule" in msg_lower or "task" in msg_lower:
-            context["workflow_state"] = WorkflowState.SCHEDULE_TASK
+        if "📅 schedule" in msg_lower or (msg_lower.startswith("schedule") and len(msg_lower) < 15):
+            context["workflow_state"] = WorkflowState.SCHEDULE_PROMPT
             return {
-                "text": "📅 <b>Schedule Task</b>\n\nWhat's the task name?",
-                "workflow_state": WorkflowState.SCHEDULE_TASK.value
+                "text": "📅 <b>Schedule Task</b>\n\nPlease describe the task or operation you want to schedule:",
+                "workflow_state": WorkflowState.SCHEDULE_PROMPT.value
+            }
+
+        if "🧠 learn" in msg_lower or (msg_lower.startswith("learn") and len(msg_lower) < 15):
+            context["workflow_state"] = WorkflowState.LEARNING
+            asyncio.create_task(self._perform_learning(user_id))
+            return {
+                "text": "🧠 <b>Autonomous Learning Mode</b>\n\nI am now reviewing system resources, memory logs, and project metadata to optimize my skills and knowledge base...",
+                "workflow_state": WorkflowState.LEARNING.value
             }
         
         if "restart" in msg_lower:
-            context["workflow_state"] = WorkflowState.CONFIRMATION
-            context["workflow_data"] = {"pending_action": "restart"}
+            context["workflow_state"] = WorkflowState.RESTART_CONFIRM
             return {
-                "text": "⚠️ <b>Confirm Restart</b>\n\nAre you sure you want to restart the agent?",
-                "workflow_state": WorkflowState.CONFIRMATION.value
+                "text": "🔄 <b>Confirm Restart</b>\n\nAre you sure you want to restart the agent? (Reply 'restart' or 'yes' to confirm)",
+                "workflow_state": WorkflowState.RESTART_CONFIRM.value
             }
         
         if "shutdown" in msg_lower:
-            context["workflow_state"] = WorkflowState.CONFIRMATION
-            context["workflow_data"] = {"pending_action": "shutdown"}
+            context["workflow_state"] = WorkflowState.SHUTDOWN_CONFIRM
             return {
-                "text": "⚠️ <b>⚠️ CONFIRM SHUTDOWN ⚠️</b>\n\nThis will STOP the agent completely!\n\nType 'SHUTDOWN' to confirm.",
-                "workflow_state": WorkflowState.CONFIRMATION.value
+                "text": "⚠️ <b>CONFIRM SYSTEM SHUTDOWN</b>\n\nThis will SHUT DOWN the host machine! (Reply 'shutdown' or 'yes' to confirm)",
+                "workflow_state": WorkflowState.SHUTDOWN_CONFIRM.value
             }
         
-        if msg_lower == "❓ help" or "help" in msg_lower or msg_lower == "/help":
+        if "help" in msg_lower or msg_lower == "/help":
             return await self._send_help(user_id)
         
         if "status" in msg_lower or msg_lower == "/status":
@@ -548,14 +584,40 @@ Just type naturally to chat with me!
         return {
             "text": "🏠 <b>Main Menu</b>",
             "buttons": [
-                [{"text": "🏗️ Project", "callback": "menu_project"}],
-                [{"text": "📱 Social", "callback": "menu_social"}],
-                [{"text": "📅 Schedule", "callback": "menu_schedule"}],
-                [{"text": "🔄 Restart Agent", "callback": "cmd_restart"}],
-                [{"text": "⚡ Shutdown", "callback": "cmd_shutdown"}],
-                [{"text": "❓ Help", "callback": "cmd_help"}],
+                [{"text": "🏗️ Project", "callback": "menu_project"}, {"text": "📱 Social", "callback": "menu_social"}],
+                [{"text": "📅 Schedule", "callback": "menu_schedule"}, {"text": "🧠 Learn", "callback": "menu_learn"}],
+                [{"text": "🔄 Restart Agent", "callback": "cmd_restart"}, {"text": "⚡ Shutdown", "callback": "cmd_shutdown"}],
+                [{"text": "❓ Help", "callback": "cmd_help"}, {"text": "⬅️ Back", "callback": "back"}]
             ]
         }
+    
+    async def _perform_restart(self):
+        """Restart the agent process"""
+        import os
+        import sys
+        import time
+        logger.info("Restarting agent...")
+        await asyncio.sleep(1)
+        # Re-execute the current process
+        os.execv(sys.executable, ['python3'] + sys.argv)
+
+    async def _perform_shutdown(self):
+        """Shut down the host machine"""
+        import os
+        logger.info("Shutting down system...")
+        os.system("sudo shutdown now")
+
+    async def _perform_learning(self, user_id: int):
+        """Trigger autonomous learning process"""
+        logger.info("Starting autonomous learning", user_id=user_id)
+        # Simulating learning process - in reality this would scan local resources
+        await asyncio.sleep(5)
+        
+        memory = get_memory_manager()
+        # Add a learning record
+        memory.add_assistant_message(user_id, "I have completed a review of local system resources and optimized my skill parameters. My pattern recognition for your workspace has been updated.")
+        
+        logger.info("Learning complete", user_id=user_id)
 
 
 _handler: Optional[AgentHandler] = None

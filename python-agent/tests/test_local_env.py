@@ -2,9 +2,12 @@
 Local Environment Tests - Comprehensive Validation
 Tests to verify all local dependencies and configurations work correctly
 """
-import pytest
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress passlib deprecation warnings in Python 3.12+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="passlib")
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -22,7 +22,6 @@ from app.integrations.file_manager import get_file_manager
 from app.integrations.browser_controller import get_browser_controller
 from app.integrations.agent_handler import get_agent_handler
 from app.integrations.unified_commands import get_command_handler
-from app.integrations.legacy_handlers import get_legacy_handler
 
 logger = structlog.get_logger(__name__)
 
@@ -34,9 +33,9 @@ class TelegramBotManager:
     MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [
             [KeyboardButton("🏗️ Project"), KeyboardButton("📱 Social")],
-            [KeyboardButton("📅 Schedule"), KeyboardButton("🔄 Restart Agent")],
-            [KeyboardButton("⚡ Shutdown"), KeyboardButton("❓ Help")],
-            [KeyboardButton("⬅️ Back")],
+            [KeyboardButton("📅 Schedule"), KeyboardButton("🧠 Learn")],
+            [KeyboardButton("🔄 Restart Agent"), KeyboardButton("⚡ Shutdown")],
+            [KeyboardButton("❓ Help"), KeyboardButton("⬅️ Back")],
         ],
         resize_keyboard=True,
     )
@@ -182,11 +181,10 @@ class TelegramBotManager:
             raise
     
     def _register_handlers(self):
-        """Register command handlers - unified with Node.js telegram.ts logic"""
+        """Register command handlers - simplified and unified"""
         command_handler = get_command_handler()
-        legacy_handler = get_legacy_handler()
         
-        # Command handlers - unified
+        # Command handlers - preferably from unified_commands (Inline UI)
         self.application.add_handler(CommandHandler("start", command_handler.handle_start))
         self.application.add_handler(CommandHandler("help", command_handler.handle_help))
         self.application.add_handler(CommandHandler("status", command_handler.handle_status))
@@ -196,11 +194,12 @@ class TelegramBotManager:
         self.application.add_handler(CommandHandler("post", command_handler.handle_post_command))
         self.application.add_handler(CommandHandler("skill", command_handler.handle_skills_command))
         
-        # Legacy handlers
-        self.application.add_handler(CommandHandler("file", legacy_handler.handle_file_command))
-        self.application.add_handler(CommandHandler("open", legacy_handler.handle_browser_command))
-        self.application.add_handler(CommandHandler("schedule", legacy_handler.handle_schedule_command))
-        self.application.add_handler(CommandHandler("link", legacy_handler.handle_link_command))
+        # Map additional legacy commands to existing local handlers
+        self.application.add_handler(CommandHandler("file", self.handle_file))
+        self.application.add_handler(CommandHandler("open", self.handle_open_url))
+        self.application.add_handler(CommandHandler("link", self.handle_link))
+        
+        # Note: /schedule is handled by the natural language bridge or menu buttons
         
         # Callback query handler for inline buttons
         self.application.add_handler(CallbackQueryHandler(command_handler.handle_callback_query))
@@ -1070,12 +1069,19 @@ class TelegramBotManager:
         try:
             webhook_url = f"{settings.telegram_webhook_url}/telegram/webhook" if settings.telegram_webhook_url else None
             
+            # Components must be started first
+            await self.application.start()
+            
             if webhook_url:
                 await self.application.bot.set_webhook(webhook_url)
                 logger.info(f"Webhook set to {webhook_url}")
+            else:
+                # Local development - use polling
+                logger.info("Starting Telegram bot in polling mode...")
+                # In v20+, we start the updater explicitly for background polling
+                await self.application.updater.start_polling()
             
-            await self.application.start()
-            logger.info("Telegram bot started")
+            logger.info("Telegram bot started successfully")
         except Exception as e:
             logger.error(f"Bot start failed: {e}")
             raise
@@ -1084,6 +1090,9 @@ class TelegramBotManager:
         """Stop bot"""
         if self.application:
             try:
+                if self.application.updater and self.application.updater.running:
+                    await self.application.updater.stop()
+                
                 await self.application.stop()
                 await self.application.shutdown()
                 logger.info("Telegram bot stopped")
