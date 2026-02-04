@@ -410,6 +410,122 @@ Include:
             categories[skill.category]["skills"].append(skill.slug)
         return list(categories.values())
 
+    def get_skill(self, skill_slug: str) -> Optional[Skill]:
+        """Get skill by slug"""
+        return self.installed_skills.get(skill_slug)
+
+    def detect_skill_intent(self, message: str) -> Optional[str]:
+        """
+        Detect which skill should handle the message
+        Uses keyword matching and patterns
+        """
+        message_lower = message.lower()
+        
+        # Intent detection patterns
+        intent_patterns = {
+            "python-web-api": [
+                "project", "create project", "new project", "build",
+                "repository", "github", "code", "develop", "api", "fastapi"
+            ],
+            "blog-post": [
+                "post", "tweet", "social", "facebook", "twitter",
+                "linkedin", "instagram", "share", "blog"
+            ],
+            "unit-tests": [
+                "test", "unittest", "pytest", "tests"
+            ],
+            "docker-config": [
+                "docker", "container", "compose"
+            ],
+            "security-audit": [
+                "security", "audit", "vulnerability", "scan"
+            ],
+            "browser_controller": [
+                "browse", "browser", "webpage", "scrape", "screenshot",
+                "url", "navigate", "web"
+            ]
+        }
+        
+        # Score each skill
+        scores = {}
+        for skill_name, keywords in intent_patterns.items():
+            score = sum(1 for keyword in keywords if keyword in message_lower)
+            if score > 0:
+                scores[skill_name] = score
+        
+        if scores:
+            # Return skill with highest score
+            best_skill = max(scores.items(), key=lambda x: x[1])[0]
+            logger.info(
+                "skill_intent_detected",
+                skill=best_skill,
+                score=scores[best_skill],
+                message_preview=message[:50]
+            )
+            return best_skill
+        
+        return None
+
+    async def route_message_to_skill(
+        self,
+        message: str,
+        user_id: int,
+        context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Route message to appropriate skill with intelligent intent detection
+        """
+        # Detect skill intent
+        skill_name = self.detect_skill_intent(message)
+        
+        if not skill_name:
+            return {
+                "success": False,
+                "error": "Could not determine which feature to use",
+                "suggestion": "Try being more specific (e.g., 'create project', 'post to social', 'schedule task')"
+            }
+        
+        # Get skill instance
+        skill = self.get_skill(skill_name)
+        if not skill:
+            return {
+                "success": False,
+                "error": f"Skill '{skill_name}' not available"
+            }
+        
+        # Execute skill
+        try:
+            # Note: registry.execute_skill uses Ollama generate with prompt template
+            # For built-in skills in app/skills/*.py, we might need a different execution path
+            # But the current registry stores Skill objects with prompt templates.
+            
+            # Use the existing execute_skill method
+            params = context or {}
+            params["description"] = message # Default description if not provided
+            
+            result = await self.execute_skill(
+                skill_slug=skill_name,
+                params=params,
+                user_id=user_id
+            )
+            
+            return {
+                "success": result.success,
+                "skill_used": skill_name,
+                "result": {
+                    "text": result.output,
+                    "data": getattr(result, 'data', None),
+                    "error": result.error
+                }
+            }
+        except Exception as e:
+            logger.error("skill_execution_failed", skill=skill_name, error=str(e))
+            return {
+                "success": False,
+                "skill_attempted": skill_name,
+                "error": str(e)
+            }
+
 
 # Global registry
 _skill_registry: Optional[SkillRegistry] = None
