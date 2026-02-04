@@ -14,8 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 print_header() {
     echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}║  🐍 Ultimate Python Agent v4.0 - Qwen3-coder Cloud       ║${NC}"
-    echo -e "${MAGENTA}║  LangGraph • FastAPI • SQLAlchemy • Ollama Cloud            ║${NC}"
+    echo -e "${MAGENTA}║  🐍 Ultimate Python Agent v4.0 - Unified Telegram Bot       ║${NC}"
+    echo -e "${MAGENTA}║  FastAPI • Python-Telegram-Bot • SQLAlchemy • Ollama        ║${NC}"
     echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -42,7 +42,7 @@ print_warning() {
 
 get_port_pid() {
     local port=$1
-    lsof -ti:$port 2>/dev/null | awk 'NR==1 {print $2}' || echo ""
+    lsof -ti:$port 2>/dev/null || echo ""
 }
 
 load_env() {

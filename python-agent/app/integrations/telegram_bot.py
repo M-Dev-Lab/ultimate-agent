@@ -1,13 +1,14 @@
 """
 Telegram bot integration for Ultimate Coding Agent
 Interactive bot with skills, filesystem, and social media capabilities
+Unified command handler consolidates all Node.js telegram.ts functionality
 """
 
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, ApplicationBuilder
+from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ApplicationBuilder
 from telegram.request import HTTPXRequest
 import structlog
 
@@ -20,6 +21,8 @@ from app.integrations.ollama import get_ollama_client
 from app.integrations.file_manager import get_file_manager
 from app.integrations.browser_controller import get_browser_controller
 from app.integrations.agent_handler import get_agent_handler
+from app.integrations.unified_commands import get_command_handler
+from app.integrations.legacy_handlers import get_legacy_handler
 
 logger = structlog.get_logger(__name__)
 
@@ -179,17 +182,30 @@ class TelegramBotManager:
             raise
     
     def _register_handlers(self):
-        """Register command handlers"""
-        self.application.add_handler(CommandHandler("start", self.handle_start))
-        self.application.add_handler(CommandHandler("help", self.handle_help))
-        self.application.add_handler(CommandHandler("build", self.handle_build))
-        self.application.add_handler(CommandHandler("skill", self.handle_skill))
-        self.application.add_handler(CommandHandler("status", self.handle_status))
-        self.application.add_handler(CommandHandler("health", self.handle_health))
-        self.application.add_handler(CommandHandler("file", self.handle_file))
-        self.application.add_handler(CommandHandler("post", self.handle_post))
-        self.application.add_handler(CommandHandler("open", self.handle_open_url))
-        self.application.add_handler(CommandHandler("link", self.handle_link))
+        """Register command handlers - unified with Node.js telegram.ts logic"""
+        command_handler = get_command_handler()
+        legacy_handler = get_legacy_handler()
+        
+        # Command handlers - unified
+        self.application.add_handler(CommandHandler("start", command_handler.handle_start))
+        self.application.add_handler(CommandHandler("help", command_handler.handle_help))
+        self.application.add_handler(CommandHandler("status", command_handler.handle_status))
+        self.application.add_handler(CommandHandler("build", command_handler.handle_build_command))
+        self.application.add_handler(CommandHandler("code", command_handler.handle_code_command))
+        self.application.add_handler(CommandHandler("fix", command_handler.handle_fix_command))
+        self.application.add_handler(CommandHandler("post", command_handler.handle_post_command))
+        self.application.add_handler(CommandHandler("skill", command_handler.handle_skills_command))
+        
+        # Legacy handlers
+        self.application.add_handler(CommandHandler("file", legacy_handler.handle_file_command))
+        self.application.add_handler(CommandHandler("open", legacy_handler.handle_browser_command))
+        self.application.add_handler(CommandHandler("schedule", legacy_handler.handle_schedule_command))
+        self.application.add_handler(CommandHandler("link", legacy_handler.handle_link_command))
+        
+        # Callback query handler for inline buttons
+        self.application.add_handler(CallbackQueryHandler(command_handler.handle_callback_query))
+        
+        # Message handler for text
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
     
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

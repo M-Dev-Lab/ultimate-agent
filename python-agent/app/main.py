@@ -59,7 +59,7 @@ from app.models.schemas import ErrorResponse
 from app.api import build_router, analysis_router, health_router, websocket_router, memory_router
 from app.db.session import init_db, close_db
 from app.memory import init_memory_system, shutdown_memory_system
-# Telegram bot is now handled by Node.js (src/telegram.ts)
+from app.integrations.telegram_bot import init_telegram_bot, start_telegram_bot, stop_telegram_bot, notify_admin_on_startup
 
 # Initialize FastAPI app
 app = FastAPI(
