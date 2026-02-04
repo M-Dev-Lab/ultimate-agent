@@ -10,7 +10,9 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import urllib.parse
 import structlog
+from app.core.terminal_logger import TerminalActionLogger
 
 from app.core.config import settings
 
@@ -71,6 +73,7 @@ class BrowserController:
             subprocess.Popen([browser_path, url], start_new_session=True)
             
             browser_name = browser or "detected browser"
+            TerminalActionLogger.log_action("Browser Opened", f"{browser_name}: {url[:40]}...")
             return BrowserResult(
                 success=True,
                 operation="open_url",
@@ -89,7 +92,8 @@ class BrowserController:
     
     async def post_to_twitter(self, text: str, media_path: str = None) -> BrowserResult:
         """Open Twitter/X compose tweet dialog"""
-        tweet_url = f"https://twitter.com/intent/tweet?text={text.replace(' ', '%20')}"
+        safe_text = urllib.parse.quote(text)
+        tweet_url = f"https://twitter.com/intent/tweet?text={safe_text}"
         return await self.open_url(tweet_url, "chrome")
     
     async def post_to_linkedin(self, text: str, media_path: str = None) -> BrowserResult:
@@ -99,7 +103,8 @@ class BrowserController:
     
     async def post_to_facebook(self, text: str, media_path: str = None) -> BrowserResult:
         """Open Facebook share dialog"""
-        share_url = f"https://www.facebook.com/sharer/sharer.php?u=https://example.com&quote={text.replace(' ', '%20')}"
+        safe_text = urllib.parse.quote(text)
+        share_url = f"https://www.facebook.com/sharer/sharer.php?u=https://example.com&quote={safe_text}"
         return await self.open_url(share_url, "chrome")
     
     async def post_to_instagram(self, text: str = None, media_path: str = None) -> BrowserResult:
@@ -159,6 +164,7 @@ class BrowserController:
         }
         
         if platform in platforms:
+            TerminalActionLogger.log_action("Social Post Initiated", f"Platform: {platform}")
             return await platforms[platform]()
         
         return BrowserResult(
@@ -233,16 +239,20 @@ class BrowserController:
             return False
     
     def _get_browser_path(self, browser: str = None) -> Optional[str]:
-        """Get browser executable path"""
+        """Get browser executable path with fallback"""
         if not browser:
+            # Return first available if no preference
+            if self.available_browsers:
+                return next(iter(self.available_browsers.values()))
             return None
         
         browser = browser.lower()
         
+        # 1. Check detected browsers
         if browser in self.available_browsers:
             return self.available_browsers[browser]
         
-        # Try to find in PATH
+        # 2. Try to find in PATH
         try:
             result = subprocess.run(
                 ["which", browser],
@@ -250,9 +260,17 @@ class BrowserController:
                 timeout=2
             )
             if result.returncode == 0:
-                return result.stdout.decode().strip()
+                path = result.stdout.decode().strip()
+                if path:
+                    return path
         except:
             pass
+        
+        # 3. Last fallback: return any available browser
+        if self.available_browsers:
+            first_found = next(iter(self.available_browsers.keys()))
+            logger.warning(f"Browser '{browser}' not found, falling back to {first_found}")
+            return self.available_browsers[first_found]
         
         return None
     

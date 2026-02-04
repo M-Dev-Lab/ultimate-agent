@@ -48,7 +48,7 @@ class SkillRegistry:
     
     def __init__(self):
         self.skills_dir = Path(__file__).parent.parent.parent / "skills"
-        self.sampling_dir = Path("/home/zeds/Desktop/ultimate-agent/Sampling Projects /openclaw-main/src/agents/skills")
+        self.sampling_dir = Path("/home/zeds/Desktop/ultimate-agent/Sampling- Resources/openclaw-main/src/agents/skills")
         self.installed_skills: Dict[str, Skill] = {}
         self.skill_prompts: Dict[str, str] = {}
         

@@ -215,9 +215,8 @@ async def health_check():
     }
 
 
-# ==================== Telegram Webhook Endpoint ====================
-# DISABLED: Using Node.js Telegram bot instead (src/telegram.ts)
-# The Node.js bot handles all Telegram interactions
+# ==================== Telegram Integration ====================
+# The Unified Python Agent handles all Telegram interactions (Phase 2.0)
 # 
 # @app.post("/telegram/webhook", tags=["Telegram"])
 # async def telegram_webhook(request: Request):

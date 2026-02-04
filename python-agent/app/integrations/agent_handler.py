@@ -20,6 +20,9 @@ from app.db.session import SessionLocal
 from app.models.database import WorkflowSession
 import time
 import structlog
+import subprocess
+import sys
+from app.core.terminal_logger import TerminalActionLogger
 
 logger = structlog.get_logger(__name__)
 
@@ -187,6 +190,7 @@ When responding to Telegram users:
             # Special case for workflow handling if it exists
             context = self.get_context(user_id)
             if context["workflow_state"] != WorkflowState.IDLE:
+                TerminalActionLogger.log_workflow(user_id, context["workflow_state"].value, message)
                 workflow_result = await self._handle_workflow(user_id, message)
                 response_text = workflow_result.get("text", "Done!")
                 skill_used = "workflow_" + str(context["workflow_state"].value)
@@ -195,12 +199,16 @@ When responding to Telegram users:
             else:
                 # FIX: Check for general commands/buttons first
                 general_result = await self._handle_general_message(user_id, message)
-                if general_result and general_result.get("workflow_state") != WorkflowState.IDLE:
+                
+                # If it's a menu navigation, wizard start, or instant command
+                if general_result:
                     response_text = general_result.get("text")
                     workflow_buttons = general_result.get("buttons")
                     skill_used = "menu_nav"
+                    TerminalActionLogger.log_action("Menu Navigation", f"Target: {response_text[:30]}...")
                 else:
                     # Detect and route to skill
+                    TerminalActionLogger.log_action("Skill Routing", f"Prompt: {message[:30]}...")
                     skill_result = await error_handler.execute_with_retry(
                         self.skill_registry.route_message_to_skill,
                         message,
@@ -213,6 +221,7 @@ When responding to Telegram users:
                         response_text = skill_result["result"].get("text", "Done!")
                         skill_used = skill_result.get("skill_used")
                         workflow_buttons = skill_result["result"].get("buttons")
+                        TerminalActionLogger.log_skill(skill_used or "unknown", user_id)
                     else:
                         # Fallback to general AI response
                         conversation = memory_manager.build_conversation_for_ollama(user_id)
@@ -244,10 +253,9 @@ When responding to Telegram users:
                 "text": response_text,
                 "success": True,
                 "response_time_ms": response_time_ms,
-                "buttons": workflow_buttons
+                "buttons": workflow_buttons,
+                "workflow_state": context["workflow_state"].value
             }
-            if context["workflow_state"] != WorkflowState.IDLE:
-                result["workflow_state"] = context["workflow_state"].value
             
             # Persist state if active
             if context["workflow_state"] != WorkflowState.IDLE:
@@ -422,15 +430,15 @@ When responding to Telegram users:
         
         msg_lower = message.lower().strip()
         
-        # NEW 7-BUTTON MAIN MENU DETECTION
-        if "🏗️ project" in msg_lower or (msg_lower.startswith("project") and len(msg_lower) < 15):
+        # NEW 7-BUTTON MAIN MENU DETECTION (Robust match)
+        if any(x in msg_lower for x in ["🏗️", "project"]) and len(msg_lower) < 20:
             context["workflow_state"] = WorkflowState.PROJECT_NAME
             return {
                 "text": "🏗️ <b>Create New Project</b>\n\nWhat is the name of your project?",
                 "workflow_state": WorkflowState.PROJECT_NAME.value
             }
         
-        if "📱 social" in msg_lower or (msg_lower.startswith("social") and len(msg_lower) < 15):
+        if any(x in msg_lower for x in ["📱", "social"]) and len(msg_lower) < 20:
             context["workflow_state"] = WorkflowState.SOCIAL_TYPE
             return {
                 "text": "📱 <b>Social Media Sharing</b>\n\nWhat type of content do you want to share?",
@@ -441,7 +449,7 @@ When responding to Telegram users:
                 "workflow_state": WorkflowState.SOCIAL_TYPE.value
             }
         
-        if "📅 schedule" in msg_lower or (msg_lower.startswith("schedule") and len(msg_lower) < 15):
+        if any(x in msg_lower for x in ["📅", "schedule"]) and len(msg_lower) < 20:
             context["workflow_state"] = WorkflowState.SCHEDULE_TYPE
             return {
                 "text": "📅 <b>Schedule Task</b>\n\nSelect the task type:",
@@ -452,7 +460,7 @@ When responding to Telegram users:
                 "workflow_state": WorkflowState.SCHEDULE_TYPE.value
             }
 
-        if "🧠 learn" in msg_lower or (msg_lower.startswith("learn") and len(msg_lower) < 15):
+        if any(x in msg_lower for x in ["🧠", "learn"]) and len(msg_lower) < 20:
             context["workflow_state"] = WorkflowState.LEARN_MODE
             return {
                 "text": "🧠 <b>Autonomous Learning</b>\n\nSelect learning mode:",
@@ -464,7 +472,7 @@ When responding to Telegram users:
                 "workflow_state": WorkflowState.LEARN_MODE.value
             }
         
-        if "restart" in msg_lower:
+        if any(x in msg_lower for x in ["🔄", "restart"]):
             context["workflow_state"] = WorkflowState.RESTART_CONFIRM
             return {
                 "text": "🔄 <b>Confirm Restart</b>\n\nAre you sure you want to restart the agent? (Reply 'restart' or 'yes' to confirm)",
@@ -472,7 +480,7 @@ When responding to Telegram users:
                 "buttons": [[{"text": "✅ Yes, Restart", "callback": "restart_yes"}, {"text": "❌ No", "callback": "back"}]]
             }
         
-        if "shutdown" in msg_lower:
+        if any(x in msg_lower for x in ["⚡", "shutdown"]):
             context["workflow_state"] = WorkflowState.SHUTDOWN_CONFIRM
             return {
                 "text": "⚠️ <b>CONFIRM SYSTEM SHUTDOWN</b>\n\nThis will SHUT DOWN the host machine! (Reply 'shutdown' or 'yes' to confirm)",
@@ -480,7 +488,7 @@ When responding to Telegram users:
                 "buttons": [[{"text": "⚠️ SHUTDOWN NOW", "callback": "shutdown_yes"}, {"text": "❌ Cancel", "callback": "back"}]]
             }
         
-        if "help" in msg_lower or msg_lower == "/help":
+        if any(x in msg_lower for x in ["❓", "help"]):
             context["workflow_state"] = WorkflowState.HELP_CATEGORY
             return {
                 "text": "❓ <b>Help Center</b>\n\nSelect a category for assistance:",
@@ -491,14 +499,16 @@ When responding to Telegram users:
                 "workflow_state": WorkflowState.HELP_CATEGORY.value
             }
         
-        if "status" in msg_lower or msg_lower == "/status":
+        if any(x in msg_lower for x in ["📊", "status"]):
+            TerminalActionLogger.log_action("System Status", f"User: {user_id}")
             return await self._send_status(user_id)
         
-        if "back" in msg_lower or "⬅️" in message:
+        if any(x in msg_lower for x in ["back", "⬅️", "home", "🏠", "main menu"]):
+            TerminalActionLogger.log_action("Home/Back", f"User: {user_id}")
             return await self._handle_back(user_id)
         
-        # Default: Send to AI
-        return await self._send_to_ai(user_id, message, context)
+        # No general command matched
+        return None
     
     async def _send_to_ai(
         self,
@@ -763,10 +773,26 @@ Just type naturally to chat with me!
         """Restart the agent process"""
         import os
         import sys
-        import time
-        logger.info("Restarting agent...")
+        import subprocess
+        
+        TerminalActionLogger.log_system("Initiating Agent Restart...")
         await asyncio.sleep(1)
-        # Re-execute the current process
+        
+        # Determine path to start-agent.sh
+        # Assuming we are in python-agent/app/integrations/
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../start-agent.sh"))
+        
+        if os.path.exists(script_path):
+            TerminalActionLogger.log_system(f"Found script at {script_path}. Executing restart...")
+            # Use subprocess to call the script and then exit
+            try:
+                subprocess.Popen(["bash", script_path, "restart"], start_new_session=True)
+                sys.exit(0)
+            except Exception as e:
+                TerminalActionLogger.log_action("Restart Failed", str(e), success=False)
+        
+        # Fallback to process replacement
+        TerminalActionLogger.log_system("Falling back to os.execv restart...")
         os.execv(sys.executable, ['python3'] + sys.argv)
 
     async def _perform_shutdown(self):
