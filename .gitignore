@@ -160,3 +160,14 @@ python-agent/.coverage
 # ============================================
 coverage/
 .nyc_output/
+
+# ============================================
+# Autonomous Agent & MCP
+# ============================================
+.agent.pid
+data/mcp_cache/
+data/mcp_registry.json
+config/schedules.json
+memory/TASKS.md
+outputs/screenshots/
+outputs/reports/

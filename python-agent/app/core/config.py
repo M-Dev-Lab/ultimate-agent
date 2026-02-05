@@ -114,6 +114,25 @@ class Settings(BaseSettings):
     # This prevents duplicate Telegram bots when both Node.js and Python implementations exist.
     use_python_telegram: bool = False
 
+    # ==================== Autonomous Agent Configuration ====================
+    autonomous_mode: bool = Field(default=True, description="Enable autonomous background operation")
+    check_interval: int = Field(default=300, description="Task check interval in seconds (default: 5 minutes)")
+    autonomous_max_tasks: int = Field(default=3, description="Max concurrent autonomous tasks")
+
+    # ==================== MCP Integration ====================
+    enable_mcp_servers: bool = Field(default=True, description="Enable MCP server integration")
+    mcp_auto_install: bool = Field(default=True, description="Auto-install MCP servers on demand")
+    mcp_cache_dir: str = Field(default="./data/mcp_cache", description="MCP server cache directory")
+
+    # Claude API (Optional - for MCP integration)
+    claude_api_key: Optional[SecretStr] = Field(default=None, description="Claude API key for MCP features")
+
+    # ==================== Agent Directories ====================
+    outputs_dir: str = Field(default="./outputs/finished", description="Completed projects directory")
+    screenshots_dir: str = Field(default="./outputs/screenshots", description="Browser screenshots directory")
+    reports_dir: str = Field(default="./outputs/reports", description="Generated reports directory")
+    config_dir: str = Field(default="./config", description="Configuration files directory")
+
     @field_validator("jwt_secret")
     @classmethod
     def validate_jwt_secret(cls, v):
@@ -139,3 +158,33 @@ settings = Settings()
 def get_settings() -> Settings:
     """Dependency to get settings instance"""
     return settings
+
+
+# ==================== Initialize Directories ====================
+import os
+from pathlib import Path
+
+# Create all necessary directories on startup
+_directories = [
+    settings.data_dir,
+    settings.workspace_dir,
+    settings.memory_dir,
+    settings.logs_dir,
+    settings.outputs_dir,
+    settings.screenshots_dir,
+    settings.reports_dir,
+    settings.config_dir,
+    settings.mcp_cache_dir,
+]
+
+for directory in _directories:
+    Path(directory).mkdir(parents=True, exist_ok=True)
+
+print(f"""
+╔════════════════════════════════════════════════════════════╗
+║  {settings.app_name} v{settings.app_version}
+║  Environment: {settings.environment}
+║  Autonomous Mode: {'ENABLED' if settings.autonomous_mode else 'DISABLED'}
+║  MCP Integration: {'ENABLED' if settings.enable_mcp_servers else 'DISABLED'}
+╚════════════════════════════════════════════════════════════╝
+""")

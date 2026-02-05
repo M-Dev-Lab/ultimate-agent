@@ -53,6 +53,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from datetime import datetime
+from typing import Optional
 
 from app.core.config import settings
 from app.models.schemas import ErrorResponse
@@ -60,18 +61,26 @@ from app.api import build_router, analysis_router, health_router, websocket_rout
 from app.db.session import init_db, close_db
 from app.memory import init_memory_system, shutdown_memory_system
 from app.integrations.telegram_bot import init_telegram_bot, start_telegram_bot, stop_telegram_bot, notify_admin_on_startup
+from app.agents.autonomous import AutonomousWorker
+from app.agents.brain import AgentBrain
+from app.mcp.manager import MCPServerManager
 
 # Initialize FastAPI app
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Secure AI-Powered Coding Agent (Python)",
+    description="Autonomous AI-Powered Coding Agent with MCP Integration (Python)",
     debug=settings.debug,
 )
 
 # Configure rate limiting
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
+
+# Global instances for autonomous operation
+autonomous_worker: Optional[AutonomousWorker] = None
+agent_brain: Optional[AgentBrain] = None
+mcp_manager: Optional[MCPServerManager] = None
 
 
 # ==================== Middleware Configuration ====================
@@ -252,6 +261,81 @@ app.include_router(memory_router)
 logger.info("FastAPI application initialized", app=settings.app_name, version=settings.app_version)
 
 
+# ==================== New Autonomous & MCP Endpoints ====================
+
+@app.get("/autonomous/status", tags=["Autonomous"])
+async def get_autonomous_status():
+    """Get autonomous worker status"""
+    if autonomous_worker:
+        return autonomous_worker.get_status()
+    return {"running": False, "message": "Autonomous mode not enabled"}
+
+@app.post("/autonomous/toggle", tags=["Autonomous"])
+async def toggle_autonomous(enabled: bool):
+    """Toggle autonomous mode"""
+    global autonomous_worker
+
+    if enabled and not autonomous_worker:
+        autonomous_worker = AutonomousWorker()
+        asyncio.create_task(autonomous_worker.start())
+        return {"autonomous_mode": True, "message": "Autonomous mode activated"}
+    elif not enabled and autonomous_worker:
+        autonomous_worker.stop()
+        autonomous_worker = None
+        return {"autonomous_mode": False, "message": "Autonomous mode deactivated"}
+
+    return {"autonomous_mode": enabled, "message": "No change"}
+
+@app.get("/mcp/servers", tags=["MCP"])
+async def get_mcp_servers(category: Optional[str] = None):
+    """Get available MCP servers"""
+    if not mcp_manager:
+        return {"error": "MCP integration not enabled"}
+
+    return mcp_manager.get_available_servers(category)
+
+@app.get("/mcp/stats", tags=["MCP"])
+async def get_mcp_stats():
+    """Get MCP manager statistics"""
+    if not mcp_manager:
+        return {"error": "MCP integration not enabled"}
+
+    return mcp_manager.get_stats()
+
+@app.post("/mcp/install/{server_name}", tags=["MCP"])
+async def install_mcp_server(server_name: str):
+    """Install an MCP server"""
+    if not mcp_manager:
+        return {"error": "MCP integration not enabled"}
+
+    success = await mcp_manager.install_server(server_name)
+    return {"success": success, "server": server_name}
+
+@app.post("/task/analyze", tags=["Tasks"])
+async def analyze_task(request: dict):
+    """Analyze a task using Agent Brain"""
+    if not agent_brain:
+        return {"error": "Agent brain not initialized"}
+
+    description = request.get("description", "")
+    context = request.get("context", {})
+
+    analysis = await agent_brain.analyze_request(description, context)
+    return analysis
+
+@app.post("/project/plan", tags=["Tasks"])
+async def plan_project(request: dict):
+    """Create a project plan"""
+    if not agent_brain:
+        return {"error": "Agent brain not initialized"}
+
+    description = request.get("description", "")
+    requirements = request.get("requirements", [])
+
+    plan = await agent_brain.plan_project(description, requirements)
+    return plan
+
+
 # ==================== Startup and Shutdown Events ====================
 
 @app.on_event("startup")
@@ -294,9 +378,28 @@ async def startup_event():
             logger.info("Startup notification sent to admin")
         else:
             logger.info("Python Telegram bot disabled (set USE_PYTHON_TELEGRAM=true to enable).")
-        
+
+        # Initialize Agent Brain (Decision Engine)
+        global agent_brain, mcp_manager
+        agent_brain = AgentBrain()
+        logger.info("🧠 Agent Brain initialized with Ollama Qwen3 Coder")
+
+        # Initialize MCP Manager (if enabled)
+        if settings.enable_mcp_servers:
+            mcp_manager = MCPServerManager()
+            logger.info(f"📦 MCP Manager initialized")
+
+        # Start Autonomous Worker (if enabled)
+        if settings.autonomous_mode:
+            global autonomous_worker
+            autonomous_worker = AutonomousWorker()
+            # Start in background
+            asyncio.create_task(autonomous_worker.start())
+            logger.info(f"🤖 Autonomous Worker started (check interval: {settings.check_interval}s)")
+
         logger.info("=" * 60)
-        logger.info("� ULTIMATE CODING AGENT STARTED SUCCESSFULLY")
+        logger.info("🚀 ULTIMATE LOCAL AI AGENT STARTED")
+        logger.info(f"   Autonomous: {'YES' if settings.autonomous_mode else 'NO'} | MCP: {'YES' if settings.enable_mcp_servers else 'NO'}")
         logger.info("=" * 60)
         
     except Exception as e:
@@ -309,14 +412,19 @@ async def shutdown_event():
     """Clean up resources on application shutdown"""
     logger.info("Shutting down application")
     try:
+        # Stop autonomous worker
+        if autonomous_worker:
+            autonomous_worker.stop()
+            logger.info("Autonomous worker stopped")
+
         # Stop Telegram bot
         await stop_telegram_bot()
         logger.info("Telegram bot stopped")
-        
+
         # Shutdown memory system (consolidates memory)
         shutdown_memory_system()
         logger.info("Memory system shutdown complete")
-        
+
         # Close database connections
         await close_db()
         logger.info("Database connections closed")

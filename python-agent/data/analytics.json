@@ -18,11 +18,11 @@
     },
     "menu_nav": {
       "skill_name": "menu_nav",
-      "total_calls": 22,
-      "successful_calls": 22,
+      "total_calls": 48,
+      "successful_calls": 48,
       "failed_calls": 0,
-      "avg_response_time_ms": 5.6282173503528945,
-      "last_used": "2026-02-04T22:28:52.184279"
+      "avg_response_time_ms": 3.7835240364074707,
+      "last_used": "2026-02-04T22:51:54.365500"
     },
     "workflow_social_platform": {
       "skill_name": "workflow_social_platform",
@@ -47,6 +47,22 @@
       "failed_calls": 0,
       "avg_response_time_ms": 32974.80754057566,
       "last_used": "2026-02-04T22:32:24.983546"
+    },
+    "workflow_restart_confirm": {
+      "skill_name": "workflow_restart_confirm",
+      "total_calls": 1,
+      "successful_calls": 1,
+      "failed_calls": 0,
+      "avg_response_time_ms": 25.326967239379883,
+      "last_used": "2026-02-04T22:51:10.571164"
+    },
+    "workflow_learning": {
+      "skill_name": "workflow_learning",
+      "total_calls": 1,
+      "successful_calls": 1,
+      "failed_calls": 0,
+      "avg_response_time_ms": 0.26869773864746094,
+      "last_used": "2026-02-04T22:52:13.619448"
     }
   },
   "daily_stats": {

@@ -13,6 +13,7 @@ from datetime import datetime
 import structlog
 
 from app.core.config import settings
+from app.core.workflow_logger import WorkflowLogger
 from app.integrations.ollama import get_ollama_client
 
 logger = structlog.get_logger(__name__)
@@ -350,11 +351,12 @@ Include:
         
         try:
             ollama = get_ollama_client()
+            WorkflowLogger.log_ai_action(f"Skill: {skill_slug}", prompt)
             result = await ollama.generate(
                 prompt=prompt,
                 temperature=0.7
             )
-            
+            WorkflowLogger.log_success(f"Skill {skill_slug} executed successfully")
             duration_ms = (time.time() - start_time) * 1000
             
             # Update usage stats
@@ -475,10 +477,12 @@ Include:
         """
         Route message to appropriate skill with intelligent intent detection
         """
+        WorkflowLogger.log_step("Registry", "Intent Detection", f"Prompt: {message[:50]}...")
         # Detect skill intent
         skill_name = self.detect_skill_intent(message)
         
         if not skill_name:
+            WorkflowLogger.log_step("Registry", "No Match", "Falling back to general AI")
             return {
                 "success": False,
                 "error": "Could not determine which feature to use",

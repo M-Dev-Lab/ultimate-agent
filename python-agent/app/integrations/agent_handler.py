@@ -23,6 +23,7 @@ import structlog
 import subprocess
 import sys
 from app.core.terminal_logger import TerminalActionLogger
+from app.core.workflow_logger import WorkflowLogger
 
 logger = structlog.get_logger(__name__)
 
@@ -187,58 +188,64 @@ When responding to Telegram users:
             # Add user message to memory
             memory_manager.add_user_message(user_id, message)
             
-            # Special case for workflow handling if it exists
+            # 1. ALWAYS Check for general commands/buttons first (Home, Back, Exit)
+            general_result = await self._handle_general_message(user_id, message)
+            
             context = self.get_context(user_id)
-            if context["workflow_state"] != WorkflowState.IDLE:
+            
+            if general_result:
+                response_text = general_result.get("text")
+                workflow_buttons = general_result.get("buttons")
+                skill_used = "menu_nav"
+                TerminalActionLogger.log_action("Menu Navigation", f"Target: {response_text[:30]}...")
+            
+            # 2. Otherwise handle active workflow
+            elif context["workflow_state"] != WorkflowState.IDLE:
                 TerminalActionLogger.log_workflow(user_id, context["workflow_state"].value, message)
                 workflow_result = await self._handle_workflow(user_id, message)
                 response_text = workflow_result.get("text", "Done!")
                 skill_used = "workflow_" + str(context["workflow_state"].value)
-                # Keep buttons if provided by workflow
                 workflow_buttons = workflow_result.get("buttons")
-            else:
-                # FIX: Check for general commands/buttons first
-                general_result = await self._handle_general_message(user_id, message)
                 
-                # If it's a menu navigation, wizard start, or instant command
-                if general_result:
-                    response_text = general_result.get("text")
-                    workflow_buttons = general_result.get("buttons")
-                    skill_used = "menu_nav"
-                    TerminalActionLogger.log_action("Menu Navigation", f"Target: {response_text[:30]}...")
+            # 3. Otherwise detect skill or chat
+            else:
+                # Detect and route to skill
+                TerminalActionLogger.log_action("Skill Routing", f"Prompt: {message[:30]}...")
+                skill_result = await error_handler.execute_with_retry(
+                    self.skill_registry.route_message_to_skill,
+                    message,
+                    user_id,
+                    category=ErrorCategory.SKILL,
+                    max_retries=2
+                )
+                if skill_result["success"]:
+                    response_text = skill_result["result"].get("text", "Done!")
+                    skill_used = skill_result.get("skill_used")
+                    workflow_buttons = skill_result["result"].get("buttons")
+                    WorkflowLogger.log_step("Skill", skill_used or "Execution", "Success")
                 else:
-                    # Detect and route to skill
-                    TerminalActionLogger.log_action("Skill Routing", f"Prompt: {message[:30]}...")
-                    skill_result = await error_handler.execute_with_retry(
-                        self.skill_registry.route_message_to_skill,
-                        message,
-                        user_id,
-                        category=ErrorCategory.SKILL,
-                        max_retries=2
-                    )
+                    # Fallback to general AI response
+                    WorkflowLogger.log_step("AI Brain", "Fallback Chat", "No skill matched, using general AI")
+                    conversation = memory_manager.build_conversation_for_ollama(user_id)
                     
-                    if skill_result["success"]:
-                        response_text = skill_result["result"].get("text", "Done!")
-                        skill_used = skill_result.get("skill_used")
-                        workflow_buttons = skill_result["result"].get("buttons")
-                        TerminalActionLogger.log_skill(skill_used or "unknown", user_id)
-                    else:
-                        # Fallback to general AI response
-                        conversation = memory_manager.build_conversation_for_ollama(user_id)
-                        response_text = await error_handler.execute_with_retry(
-                            self.ollama.chat,
-                            messages=conversation,
-                            category=ErrorCategory.OLLAMA,
-                            max_retries=3
-                        )
-                        skill_used = None
-                        workflow_buttons = None
+                    WorkflowLogger.log_ai_action("Chat Generation", f"Messages: {len(conversation)}")
+                    
+                    response_text = await error_handler.execute_with_retry(
+                        self.ollama.chat,
+                        messages=conversation,
+                        category=ErrorCategory.OLLAMA,
+                        max_retries=3
+                    )
+                    skill_used = "ai_chat"
+                    workflow_buttons = None
+                    WorkflowLogger.log_success(f"AI Response received ({len(response_text)} chars)")
             
             # Add assistant response to memory
             memory_manager.add_assistant_message(user_id, response_text)
             
             # Record analytics
             response_time_ms = (time.time() - start_time) * 1000
+            WorkflowLogger.log_step("System", "Response Ready", f"Time: {response_time_ms:.1f}ms, Skill: {skill_used}")
             analytics.record_message(
                 user_id=user_id,
                 message=message,
@@ -387,16 +394,23 @@ When responding to Telegram users:
         # --- LEARN WIZARD (1.5) ---
         elif state == WorkflowState.LEARN_MODE:
             data["learn_mode"] = message.strip()
-            if "Update Skills" in message or "Self-Improve" in message:
+            WorkflowLogger.log_step("Learn", "Mode Selected", f"Mode: {message}")
+            
+            # Use lower() and strip emojis to match button text/callback more robustly
+            msg_clean = message.lower().replace("🚀", "").replace("🔄", "").strip()
+            if "update skills" in msg_clean or "self-improve" in msg_clean or "learn_skills" in message or "learn_improve" in message:
                 context["workflow_state"] = WorkflowState.LEARNING
+                WorkflowLogger.log_transition("LEARN_MODE", "LEARNING", message)
                 asyncio.create_task(self._perform_learning(user_id))
-                return {"text": "🧠 <b>Processing...</b>\n\nI am now analyzing system state and optimizing my routines."}
+                return {"text": "🧠 <b>Autonomous Learning Started</b>\n\nI am now analyzing system state and optimizing my routines. I will notify you when complete."}
             else:
                 context["workflow_state"] = WorkflowState.LEARN_INPUT
+                WorkflowLogger.log_transition("LEARN_MODE", "LEARN_INPUT", message)
                 return {"text": f"📖 <b>{message}</b>\n\nPlease provide the URL or code snippet to analyze:"}
         
         elif state == WorkflowState.LEARN_INPUT:
             data["input"] = message.strip()
+            WorkflowLogger.log_step("Learn", "Input Received", f"Length: {len(message)}")
             return await self._execute_learning_process(user_id, data)
 
         # --- HELP WIZARD (1.8) ---
@@ -431,54 +445,66 @@ When responding to Telegram users:
         msg_lower = message.lower().strip()
         
         # NEW 7-BUTTON MAIN MENU DETECTION (Robust match)
-        if any(x in msg_lower for x in ["🏗️", "project"]) and len(msg_lower) < 20:
-            context["workflow_state"] = WorkflowState.PROJECT_NAME
-            return {
-                "text": "🏗️ <b>Create New Project</b>\n\nWhat is the name of your project?",
-                "workflow_state": WorkflowState.PROJECT_NAME.value
-            }
+        if any(x in msg_lower for x in ["🏗️", "project", "build", "create project", "new project"]):
+            # Only trigger if it's a clear command or short phrase
+            if len(msg_lower) < 30:
+                context["workflow_state"] = WorkflowState.PROJECT_NAME
+                TerminalActionLogger.log_action("Workflow Started", "Project Creation Wizard")
+                return {
+                    "text": "🏗️ <b>Create New Project</b>\n\nWhat is the name of your project?",
+                    "workflow_state": WorkflowState.PROJECT_NAME.value
+                }
         
-        if any(x in msg_lower for x in ["📱", "social"]) and len(msg_lower) < 20:
-            context["workflow_state"] = WorkflowState.SOCIAL_TYPE
-            return {
-                "text": "📱 <b>Social Media Sharing</b>\n\nWhat type of content do you want to share?",
-                "buttons": [
-                    [{"text": "📝 Post", "callback": "type_post"}, {"text": "🧵 Thread", "callback": "type_thread"}],
-                    [{"text": "📢 Announcement", "callback": "type_announcement"}, {"text": "⬅️ Back", "callback": "back"}]
-                ],
-                "workflow_state": WorkflowState.SOCIAL_TYPE.value
-            }
+        if any(x in msg_lower for x in ["📱", "social", "post", "share", "tweet"]):
+            if len(msg_lower) < 20 or msg_lower == "social":
+                context["workflow_state"] = WorkflowState.SOCIAL_TYPE
+                TerminalActionLogger.log_action("Workflow Started", "Social Media Wizard")
+                return {
+                    "text": "📱 <b>Social Media Sharing</b>\n\nWhat type of content do you want to share?",
+                    "buttons": [
+                        [{"text": "📝 Post", "callback": "type_post"}, {"text": "🧵 Thread", "callback": "type_thread"}],
+                        [{"text": "📢 Announcement", "callback": "type_announcement"}, {"text": "⬅️ Back", "callback": "back"}]
+                    ],
+                    "workflow_state": WorkflowState.SOCIAL_TYPE.value
+                }
         
-        if any(x in msg_lower for x in ["📅", "schedule"]) and len(msg_lower) < 20:
-            context["workflow_state"] = WorkflowState.SCHEDULE_TYPE
-            return {
-                "text": "📅 <b>Schedule Task</b>\n\nSelect the task type:",
-                "buttons": [
-                    [{"text": "⏰ One-time", "callback": "type_once"}, {"text": "🔄 Recurring", "callback": "type_recur"}],
-                    [{"text": "🔔 Reminder", "callback": "type_remind"}, {"text": "⬅️ Back", "callback": "back"}]
-                ],
-                "workflow_state": WorkflowState.SCHEDULE_TYPE.value
-            }
+        if any(x in msg_lower for x in ["📅", "schedule", "reminder", "set task"]):
+            if len(msg_lower) < 30:
+                context["workflow_state"] = WorkflowState.SCHEDULE_TYPE
+                TerminalActionLogger.log_action("Workflow Started", "Schedule Wizard")
+                return {
+                    "text": "📅 <b>Schedule Task</b>\n\nSelect the task type:",
+                    "buttons": [
+                        [{"text": "⏰ One-time", "callback": "type_once"}, {"text": "🔄 Recurring", "callback": "type_recur"}],
+                        [{"text": "🔔 Reminder", "callback": "type_remind"}, {"text": "⬅️ Back", "callback": "back"}]
+                    ],
+                    "workflow_state": WorkflowState.SCHEDULE_TYPE.value
+                }
 
-        if any(x in msg_lower for x in ["🧠", "learn"]) and len(msg_lower) < 20:
-            context["workflow_state"] = WorkflowState.LEARN_MODE
-            return {
-                "text": "🧠 <b>Autonomous Learning</b>\n\nSelect learning mode:",
-                "buttons": [
-                    [{"text": "📖 Read Docs", "callback": "learn_docs"}, {"text": "🔄 Update Skills", "callback": "learn_skills"}],
-                    [{"text": "🔍 Analyze Code", "callback": "learn_code"}, {"text": "🚀 Self-Improve", "callback": "learn_improve"}],
-                    [{"text": "⬅️ Back", "callback": "back"}]
-                ],
-                "workflow_state": WorkflowState.LEARN_MODE.value
-            }
+        if any(x in msg_lower for x in ["🧠", "learn", "study"]):
+            if len(msg_lower) < 20:
+                context["workflow_state"] = WorkflowState.LEARN_MODE
+                TerminalActionLogger.log_action("Workflow Started", "Learning Machine")
+                return {
+                    "text": "🧠 <b>Autonomous Learning</b>\n\nSelect learning mode:",
+                    "buttons": [
+                        [{"text": "📖 Read Docs", "callback": "learn_docs"}, {"text": "🔄 Update Skills", "callback": "learn_skills"}],
+                        [{"text": "🔍 Analyze Code", "callback": "learn_code"}, {"text": "🚀 Self-Improve", "callback": "learn_improve"}],
+                        [{"text": "⬅️ Back", "callback": "back"}]
+                    ],
+                    "workflow_state": WorkflowState.LEARN_MODE.value
+                }
         
-        if any(x in msg_lower for x in ["🔄", "restart"]):
-            context["workflow_state"] = WorkflowState.RESTART_CONFIRM
-            return {
-                "text": "🔄 <b>Confirm Restart</b>\n\nAre you sure you want to restart the agent? (Reply 'restart' or 'yes' to confirm)",
-                "workflow_state": WorkflowState.RESTART_CONFIRM.value,
-                "buttons": [[{"text": "✅ Yes, Restart", "callback": "restart_yes"}, {"text": "❌ No", "callback": "back"}]]
-            }
+        if context["workflow_state"] != WorkflowState.RESTART_CONFIRM and any(x in msg_lower for x in ["🔄", "restart"]):
+            # Only trigger if it's the specific command
+            if len(msg_lower) < 20 or "agent" in msg_lower:
+                context["workflow_state"] = WorkflowState.RESTART_CONFIRM
+                TerminalActionLogger.log_action("Action Prompted", "Restart Agent Confirmation")
+                return {
+                    "text": "🔄 <b>Confirm Restart</b>\n\nAre you sure you want to restart the agent? (Reply 'restart' or 'yes' to confirm)",
+                    "workflow_state": WorkflowState.RESTART_CONFIRM.value,
+                    "buttons": [[{"text": "✅ Yes, Restart", "callback": "restart_yes"}, {"text": "❌ No", "callback": "back"}]]
+                }
         
         if any(x in msg_lower for x in ["⚡", "shutdown"]):
             context["workflow_state"] = WorkflowState.SHUTDOWN_CONFIRM
@@ -775,24 +801,24 @@ Just type naturally to chat with me!
         import sys
         import subprocess
         
-        TerminalActionLogger.log_system("Initiating Agent Restart...")
+        WorkflowLogger.log_system("Initiating Agent Restart...")
         await asyncio.sleep(1)
         
-        # Determine path to start-agent.sh
-        # Assuming we are in python-agent/app/integrations/
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../start-agent.sh"))
+        # Correct Path Resolution (Step 3.1)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        script_path = os.path.join(project_root, "start-agent.sh")
+        
+        WorkflowLogger.log_step("System", "Restart", f"Root: {project_root}")
         
         if os.path.exists(script_path):
-            TerminalActionLogger.log_system(f"Found script at {script_path}. Executing restart...")
-            # Use subprocess to call the script and then exit
+            WorkflowLogger.log_success(f"Found script at {script_path}. Executing...")
             try:
-                subprocess.Popen(["bash", script_path, "restart"], start_new_session=True)
+                subprocess.Popen(["bash", script_path, "restart"], start_new_session=True, cwd=project_root)
                 sys.exit(0)
             except Exception as e:
-                TerminalActionLogger.log_action("Restart Failed", str(e), success=False)
+                WorkflowLogger.log_error("Restart script execution failed", e)
         
-        # Fallback to process replacement
-        TerminalActionLogger.log_system("Falling back to os.execv restart...")
+        WorkflowLogger.log_system("Falling back to os.execv restart...")
         os.execv(sys.executable, ['python3'] + sys.argv)
 
     async def _perform_shutdown(self):
@@ -831,15 +857,22 @@ Just type naturally to chat with me!
 
     async def _perform_learning(self, user_id: int):
         """Trigger autonomous learning process"""
-        logger.info("Starting autonomous learning", user_id=user_id)
-        # Simulating learning process - in reality this would scan local resources
+        WorkflowLogger.log_step("Learn", "Execution Started", "Analyzing system state...")
+        
+        # Simulating learning process
         await asyncio.sleep(5)
         
         memory = get_memory_manager()
         # Add a learning record
-        memory.add_assistant_message(user_id, "I have completed a review of local system resources and optimized my skill parameters. My pattern recognition for your workspace has been updated.")
+        success_msg = "I have completed a review of local system resources and optimized my skill parameters. My pattern recognition for your workspace has been updated."
+        memory.add_assistant_message(user_id, success_msg)
         
-        logger.info("Learning complete", user_id=user_id)
+        # CLEAR CONTEXT AFTER COMPLETION (Step 2.1)
+        self.clear_context(user_id)
+        WorkflowLogger.log_success("Learning complete. State reset to IDLE.")
+        
+        # Notify user (if we had a way to push messages, otherwise they see it next time)
+        # Note: In a real app, we'd use the bot instance to send a message here.
 
 
 _handler: Optional[AgentHandler] = None

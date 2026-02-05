@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 from telegram.constants import ParseMode
 from app.integrations.agent_handler import get_agent_handler
+from app.core.workflow_logger import WorkflowLogger
 import structlog
 import traceback
 
@@ -47,11 +48,8 @@ class TelegramAgentBridge:
             - action: Optional action to take
         """
         try:
+            WorkflowLogger.log_step("Bridge", "Telegram Inbound", f"From: {user_id}", {"text": message})
             self.logger.info(
-                "bridge_received_message",
-                user_id=user_id,
-                message_len=len(message)
-            )
             
             # Call agent handler to process message
             agent_response = await self.agent_handler.process_message(
@@ -97,6 +95,7 @@ class TelegramAgentBridge:
                 "schedule_data": agent_response.get("schedule_data")
             }
             
+            WorkflowLogger.log_success(f"Bridge outbound message via HTML. Text len: {len(text)}")
             self.logger.info("bridge_processed_success", text_len=len(text))
             return result
             

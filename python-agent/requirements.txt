@@ -69,3 +69,6 @@ APScheduler==3.11.2
 # System Monitoring
 psutil==6.1.1
 
+# AI APIs (Optional - for MCP integration)
+anthropic==0.40.0  # Claude API for MCP features (optional)
+
