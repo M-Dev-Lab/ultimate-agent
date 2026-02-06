@@ -293,6 +293,15 @@ Format: Markdown with code blocks."""
         ))
         
         self.register_skill(Skill(
+            name="Social Media Manager",
+            slug="social-media-manager",
+            category="social",
+            description="Post content to social media with browser automation",
+            path="app.skills.social_media_manager.SocialMediaManager",
+            prompt_template="""Manage social media posting workflow"""
+        ))
+
+        self.register_skill(Skill(
             name="GitHub README",
             slug="github-readme",
             category="social",

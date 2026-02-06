@@ -273,9 +273,10 @@ Polling: Active
         """Handle inline button callbacks"""
         query = update.callback_query
         data = query.data
-        
+        user_id = query.from_user.id
+
         logger.info(f"Callback: {data}")
-        
+
         try:
             if data == "main_menu":
                 await self._show_main_menu(query)
@@ -288,6 +289,25 @@ Polling: Active
             elif data.startswith("skill_cat_"):
                 category = data.replace("skill_cat_", "")
                 await self._show_skill_category(query, category)
+            elif data.startswith("plat_") or data == "back":
+                # Platform selection buttons (plat_facebook, plat_all, etc.) or Back button
+                # Forward to agent handler through bridge
+                from app.integrations.telegram_bridge import get_telegram_bridge
+                bridge = get_telegram_bridge()
+
+                result = await bridge.process_telegram_message(user_id, data)
+
+                # Build keyboard from buttons
+                keyboard = None
+                if result.get("buttons"):
+                    keyboard = self._build_inline_keyboard(result["buttons"])
+
+                await query.edit_message_text(
+                    text=result["text"],
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+                await query.answer()
             else:
                 await query.answer(f"Action: {data}", show_alert=False)
         except Exception as e:
@@ -379,6 +399,24 @@ Polling: Active
                 )
             keyboard.append(keyboard_row)
         return keyboard
+
+    def _build_inline_keyboard(self, buttons: list) -> InlineKeyboardMarkup:
+        """Build inline keyboard from agent handler button format"""
+        keyboard = []
+        for row in buttons:
+            if not isinstance(row, list):
+                continue
+            keyboard_row = []
+            for btn in row:
+                if isinstance(btn, dict):
+                    text = btn.get("text", "Button")
+                    callback = btn.get("callback", "unknown")
+                    keyboard_row.append(
+                        InlineKeyboardButton(text, callback_data=callback)
+                    )
+            if keyboard_row:
+                keyboard.append(keyboard_row)
+        return InlineKeyboardMarkup(keyboard) if keyboard else None
 
 
 # Singleton instance

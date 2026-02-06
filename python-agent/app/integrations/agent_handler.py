@@ -343,26 +343,130 @@ When responding to Telegram users:
 
         # --- SOCIAL WIZARD (1.3) ---
         elif state == WorkflowState.SOCIAL_TYPE:
-            type_map = {"📝 Post": "post", "🧵 Thread": "thread", "📢 Announcement": "announcement"}
-            data["content_type"] = type_map.get(message, message.lower())
+            # Handle content type selection
+            type_map = {
+                "content_text": "text",
+                "content_image": "image",
+                "content_video": "video",
+                "📝 Text": "text",
+                "🖼️ Image": "image",
+                "🎥 Video": "video"
+            }
+            content_type = type_map.get(message, message.lower())
+            data["content_type"] = content_type
             context["workflow_state"] = WorkflowState.SOCIAL_PLATFORM
-            return {
-                "text": "🌐 <b>Select Platform</b>\n\nWhere should we share this?",
-                "buttons": [
-                    [{"text": "🐦 Twitter/X", "callback": "plat_twitter"}, {"text": "📘 LinkedIn", "callback": "plat_linkedin"}],
-                    [{"text": "📕 Facebook", "callback": "plat_facebook"}, {"text": "📷 Instagram", "callback": "plat_insta"}],
-                    [{"text": "⬅️ Back", "callback": "back"}]
+
+            # Use SocialMediaManager to get platform suggestions
+            from app.skills.social_media_manager import SocialMediaManager
+            manager = SocialMediaManager()
+            result = await manager._execute({"step": "ask_platform", "content_type": content_type})
+
+            # Build platform buttons based on content type
+            platforms = []
+            if content_type == "text":
+                platforms = [
+                    [{"text": "📘 Facebook", "callback": "plat_facebook"}, {"text": "🐦 Twitter/X", "callback": "plat_twitter"}],
+                    [{"text": "💼 LinkedIn", "callback": "plat_linkedin"}, {"text": "📱 All", "callback": "plat_all"}]
                 ]
+            elif content_type == "image":
+                platforms = [
+                    [{"text": "📷 Instagram", "callback": "plat_instagram"}, {"text": "📘 Facebook", "callback": "plat_facebook"}],
+                    [{"text": "🎵 TikTok", "callback": "plat_tiktok"}, {"text": "📱 All", "callback": "plat_all"}]
+                ]
+            elif content_type == "video":
+                platforms = [
+                    [{"text": "▶️ YouTube", "callback": "plat_youtube"}, {"text": "🎵 TikTok", "callback": "plat_tiktok"}],
+                    [{"text": "📘 Facebook", "callback": "plat_facebook"}, {"text": "📷 Instagram", "callback": "plat_instagram"}],
+                    [{"text": "📱 All", "callback": "plat_all"}]
+                ]
+
+            platforms.append([{"text": "⬅️ Back", "callback": "back"}])
+
+            return {
+                "text": result.output,
+                "buttons": platforms
             }
         
         elif state == WorkflowState.SOCIAL_PLATFORM:
-            data["platform"] = message.replace("plat_", "")
-            context["workflow_state"] = WorkflowState.SOCIAL_CONTENT
-            return {"text": f"✍️ <b>Content</b>\n\nEnter the text you want to post to {data['platform']}:"}
-        
+            # Parse platform selection
+            platform_map = {
+                "plat_facebook": "facebook",
+                "plat_twitter": "twitter",
+                "plat_linkedin": "linkedin",
+                "plat_instagram": "instagram",
+                "plat_tiktok": "tiktok",
+                "plat_youtube": "youtube",
+                "plat_all": "all"
+            }
+            selected_platform = platform_map.get(message, message.replace("plat_", ""))
+
+            if selected_platform == "all":
+                # Select all platforms based on content type
+                content_type = data.get("content_type", "text")
+                if content_type == "text":
+                    data["platforms"] = ["facebook", "twitter", "linkedin"]
+                elif content_type == "image":
+                    data["platforms"] = ["instagram", "facebook", "tiktok"]
+                elif content_type == "video":
+                    data["platforms"] = ["youtube", "tiktok", "facebook", "instagram"]
+            else:
+                data["platforms"] = [selected_platform]
+
+            # We already have content, proceed to posting directly
+            platform_names = ", ".join([p.title() for p in data["platforms"]])
+            return await self._execute_social_post_with_browser(user_id, data, platform_names)
+
         elif state == WorkflowState.SOCIAL_CONTENT:
+            # Auto-detect content type from message
+            # Check if context has media info (set by Telegram handler)
+            has_photo = context.get("has_photo", False)
+            has_video = context.get("has_video", False)
+
+            if has_photo:
+                content_type = "image"
+                data["content_type"] = content_type
+                data["media_path"] = context.get("media_path")
+            elif has_video:
+                content_type = "video"
+                data["content_type"] = content_type
+                data["media_path"] = context.get("media_path")
+            else:
+                content_type = "text"
+                data["content_type"] = content_type
+
             data["content"] = message.strip()
-            return await self._execute_social_post(user_id, data)
+
+            # Suggest platforms based on detected content type
+            from app.skills.social_media_manager import SocialMediaManager
+            manager = SocialMediaManager()
+            result = await manager._execute({"step": "ask_platform", "content_type": content_type})
+
+            # Build platform buttons
+            platforms = []
+            if content_type == "text":
+                platforms = [
+                    [{"text": "📘 Facebook", "callback": "plat_facebook"}, {"text": "🐦 Twitter", "callback": "plat_twitter"}],
+                    [{"text": "💼 LinkedIn", "callback": "plat_linkedin"}, {"text": "📱 All", "callback": "plat_all"}],
+                    [{"text": "⬅️ Back", "callback": "back"}]
+                ]
+            elif content_type == "image":
+                platforms = [
+                    [{"text": "📷 Instagram", "callback": "plat_instagram"}, {"text": "📘 Facebook", "callback": "plat_facebook"}],
+                    [{"text": "🎵 TikTok", "callback": "plat_tiktok"}, {"text": "📱 All", "callback": "plat_all"}],
+                    [{"text": "⬅️ Back", "callback": "back"}]
+                ]
+            elif content_type == "video":
+                platforms = [
+                    [{"text": "▶️ YouTube", "callback": "plat_youtube"}, {"text": "🎵 TikTok", "callback": "plat_tiktok"}],
+                    [{"text": "📘 Facebook", "callback": "plat_facebook"}, {"text": "📷 Instagram", "callback": "plat_instagram"}],
+                    [{"text": "📱 All", "callback": "plat_all"}, {"text": "⬅️ Back", "callback": "back"}]
+                ]
+
+            context["workflow_state"] = WorkflowState.SOCIAL_PLATFORM
+            return {
+                "text": result.output,
+                "buttons": platforms
+            }
 
         # --- SCHEDULE WIZARD (1.4) ---
         elif state == WorkflowState.SCHEDULE_TYPE:
@@ -457,15 +561,17 @@ When responding to Telegram users:
         
         if any(x in msg_lower for x in ["📱", "social", "post", "share", "tweet"]):
             if len(msg_lower) < 20 or msg_lower == "social":
-                context["workflow_state"] = WorkflowState.SOCIAL_TYPE
-                TerminalActionLogger.log_action("Workflow Started", "Social Media Wizard")
+                context["workflow_state"] = WorkflowState.SOCIAL_CONTENT
+                TerminalActionLogger.log_action("Workflow Started", "Social Media Manager")
                 return {
-                    "text": "📱 <b>Social Media Sharing</b>\n\nWhat type of content do you want to share?",
-                    "buttons": [
-                        [{"text": "📝 Post", "callback": "type_post"}, {"text": "🧵 Thread", "callback": "type_thread"}],
-                        [{"text": "📢 Announcement", "callback": "type_announcement"}, {"text": "⬅️ Back", "callback": "back"}]
-                    ],
-                    "workflow_state": WorkflowState.SOCIAL_TYPE.value
+                    "text": "📱 <b>Social Media Posting</b>\n\n" \
+                           "Please share your content now:\n\n" \
+                           "• Type a <b>text message</b> for text posts\n" \
+                           "• Attach a <b>photo/image</b> for image posts\n" \
+                           "• Attach a <b>video</b> for video posts\n\n" \
+                           "I'll automatically detect the type and suggest the best platforms!",
+                    "buttons": [[{"text": "⬅️ Back", "callback": "back"}]],
+                    "workflow_state": WorkflowState.SOCIAL_CONTENT.value
                 }
         
         if any(x in msg_lower for x in ["📅", "schedule", "reminder", "set task"]):
@@ -694,6 +800,63 @@ Optimized version:"""
             logger.error(f"Social post failed: {e}")
             return {"text": f"❌ Error: {e}"}
     
+    async def _execute_social_post_with_browser(self, user_id: int, data: Dict, platform_names: str = None) -> Dict[str, Any]:
+        """Execute social media post with browser automation"""
+        context = self.get_context(user_id)
+
+        platforms = data.get("platforms", ["facebook"])
+        content = data.get("content", "")
+        content_type = data.get("content_type", "text")
+        media_path = data.get("media_path")  # If user attached media
+
+        if not platform_names:
+            platform_names = ", ".join([p.title() for p in platforms])
+
+        try:
+            # Use SocialMediaManager for posting
+            from app.skills.social_media_manager import SocialMediaManager
+            manager = SocialMediaManager()
+
+            # Show status message
+            TerminalActionLogger.log_action("Browser Automation", f"Opening browsers for: {platform_names}")
+
+            result = await manager._execute({
+                "step": "post_content",
+                "platforms": platforms,
+                "content_type": content_type,
+                "text": content,
+                "media_path": media_path
+            })
+
+            context["workflow_state"] = WorkflowState.IDLE
+
+            content_preview = content[:100] + "..." if len(content) > 100 else content
+
+            return {
+                "text": f"🌐 <b>Browser Opened!</b>\n\n" \
+                        f"📱 <b>Platforms:</b> {platform_names}\n" \
+                        f"📝 <b>Content:</b> {content_preview}\n\n" \
+                        f"✅ Chrome browser has been opened with the selected platform(s).\n\n" \
+                        f"📋 <b>Next Steps:</b>\n" \
+                        f"1. Log in to the platform if needed\n" \
+                        f"2. Paste your content (it's copied to clipboard!)\n" \
+                        f"3. Attach media if applicable\n" \
+                        f"4. Click Post/Share\n\n" \
+                        f"Reply 'done' when finished, or 'help' if you need assistance.",
+                "buttons": [
+                    [{"text": "✅ Done", "callback": "back"}, {"text": "🔄 Retry", "callback": "menu_social"}],
+                    [{"text": "🏠 Main Menu", "callback": "back"}],
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Browser social post failed: {e}")
+            return {
+                "text": f"❌ <b>Error Opening Browser</b>\n\n{str(e)}\n\n" \
+                        f"Please try again or open the platform manually.",
+                "buttons": [[{"text": "🔄 Try Again", "callback": "menu_social"}, {"text": "🏠 Main Menu", "callback": "back"}]]
+            }
+
     async def _execute_schedule_creation(self, user_id: int, data: Dict) -> Dict[str, Any]:
         """Execute schedule creation"""
         context = self.get_context(user_id)

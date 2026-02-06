@@ -72,3 +72,9 @@ psutil==6.1.1
 # AI APIs (Optional - for MCP integration)
 anthropic==0.40.0  # Claude API for MCP features (optional)
 
+# Browser Automation
+selenium==4.27.1
+pyperclip==1.9.0
+webdriver-manager==4.0.2
+
+undetected-chromedriver>=3.5.0

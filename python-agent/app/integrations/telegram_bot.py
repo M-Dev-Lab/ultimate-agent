@@ -477,20 +477,21 @@ class TelegramBotManager:
             user = update.effective_user
             text = update.message.text
             chat_id = update.effective_chat.id
-            
+
             logger.info(f"Telegram message received: {text[:50]}...", user_id=user.id)
-            
+
             from app.integrations.telegram_bridge import get_telegram_bridge
             bridge = get_telegram_bridge()
-            
+
             result = await bridge.process_telegram_message(chat_id, text)
-            
-            keyboard = result.get("keyboard") or self.MAIN_KEYBOARD
+
+            # Use inline keyboard if available (for callbacks), otherwise reply keyboard
+            reply_markup = result.get("inline_keyboard") or result.get("keyboard") or self.MAIN_KEYBOARD
             parse_mode = result.get("parse_mode")
-            
+
             await update.message.reply_text(
                 text=result["text"],
-                reply_markup=keyboard,
+                reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
             

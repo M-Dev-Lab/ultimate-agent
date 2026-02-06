@@ -6,7 +6,7 @@ For SINGLE ADMIN USER (not multi-user) - simplified architecture
 
 import logging
 from typing import Dict, Any, Optional, List
-from telegram import ReplyKeyboardMarkup, KeyboardButton
+from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
 from app.integrations.agent_handler import get_agent_handler
 from app.core.workflow_logger import WorkflowLogger
@@ -49,8 +49,8 @@ class TelegramAgentBridge:
         """
         try:
             WorkflowLogger.log_step("Bridge", "Telegram Inbound", f"From: {user_id}", {"text": message})
-            self.logger.info(
-            
+            self.logger.info("Processing message from user", user_id=user_id, message_preview=message[:100])
+
             # Call agent handler to process message
             agent_response = await self.agent_handler.process_message(
                 user_id=user_id,
@@ -79,15 +79,21 @@ class TelegramAgentBridge:
             
             # Determine parse mode
             parse_mode = ParseMode.HTML if self._has_html_tags(text) else None
-            
+
             # Build keyboard from buttons if present
             keyboard = None
+            inline_keyboard = None
             if "buttons" in agent_response and agent_response["buttons"]:
-                keyboard = self._build_keyboard(agent_response["buttons"])
+                # Check if buttons have callback data (use inline) or not (use reply)
+                if self._has_callbacks(agent_response["buttons"]):
+                    inline_keyboard = self._build_inline_keyboard(agent_response["buttons"])
+                else:
+                    keyboard = self._build_keyboard(agent_response["buttons"])
             
             result = {
                 "text": text,
                 "keyboard": keyboard,
+                "inline_keyboard": inline_keyboard,
                 "parse_mode": parse_mode,
                 "workflow_state": agent_response.get("workflow_state"),
                 "action": agent_response.get("action"),
@@ -140,25 +146,74 @@ class TelegramAgentBridge:
         
         return "\n".join(formatted)
     
-    def _build_keyboard(self, buttons: List[List[Dict]]) -> Optional[ReplyKeyboardMarkup]:
+    def _has_callbacks(self, buttons: List[List[Dict]]) -> bool:
+        """Check if buttons have callback data (for inline keyboard)"""
+        try:
+            for row in buttons:
+                if isinstance(row, list):
+                    for btn in row:
+                        if isinstance(btn, dict) and "callback" in btn:
+                            return True
+            return False
+        except:
+            return False
+
+    def _build_inline_keyboard(self, buttons: List[List[Dict]]) -> Optional[InlineKeyboardMarkup]:
         """
-        Build Telegram keyboard from button structure
-        
+        Build Telegram INLINE keyboard from button structure (for callbacks)
+
         Expected format:
         [
             [{"text": "Button 1", "callback": "action1"}],
+            [{"text": "Button 2", "callback": "action2"}]
+        ]
+        """
+        try:
+            if not buttons or not isinstance(buttons, list):
+                return None
+
+            keyboard = []
+            for row in buttons:
+                if not row or not isinstance(row, list):
+                    continue
+
+                button_row = []
+                for btn in row:
+                    if isinstance(btn, dict):
+                        text = btn.get("text", "Button")
+                        callback = btn.get("callback", "unknown")
+                        button_row.append(InlineKeyboardButton(text, callback_data=callback))
+
+                if button_row:
+                    keyboard.append(button_row)
+
+            if keyboard:
+                return InlineKeyboardMarkup(keyboard)
+            return None
+
+        except Exception as e:
+            self.logger.error("inline_keyboard_building_failed", error=str(e))
+            return None
+
+    def _build_keyboard(self, buttons: List[List[Dict]]) -> Optional[ReplyKeyboardMarkup]:
+        """
+        Build Telegram REPLY keyboard from button structure (for text buttons)
+
+        Expected format:
+        [
+            [{"text": "Button 1"}],
             [{"text": "Button 2"}, {"text": "Button 3"}]
         ]
         """
         try:
             if not buttons or not isinstance(buttons, list):
                 return None
-            
+
             keyboard = []
             for row in buttons:
                 if not row or not isinstance(row, list):
                     continue
-                
+
                 button_row = []
                 for btn in row:
                     if isinstance(btn, dict):
@@ -166,13 +221,13 @@ class TelegramAgentBridge:
                     else:
                         # Handle string buttons
                         text = str(btn).replace("callback=", "").strip()
-                    
+
                     if text:
                         button_row.append(KeyboardButton(text))
-                
+
                 if button_row:
                     keyboard.append(button_row)
-            
+
             if keyboard:
                 return ReplyKeyboardMarkup(
                     keyboard,
@@ -180,7 +235,7 @@ class TelegramAgentBridge:
                     one_time_keyboard=False
                 )
             return None
-            
+
         except Exception as e:
             self.logger.error("keyboard_building_failed", error=str(e))
             return None

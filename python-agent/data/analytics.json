@@ -18,35 +18,35 @@
     },
     "menu_nav": {
       "skill_name": "menu_nav",
-      "total_calls": 48,
-      "successful_calls": 48,
+      "total_calls": 67,
+      "successful_calls": 67,
       "failed_calls": 0,
-      "avg_response_time_ms": 3.7835240364074707,
-      "last_used": "2026-02-04T22:51:54.365500"
+      "avg_response_time_ms": 8.340903182527912,
+      "last_used": "2026-02-05T14:06:15.944071"
     },
     "workflow_social_platform": {
       "skill_name": "workflow_social_platform",
-      "total_calls": 6,
-      "successful_calls": 6,
+      "total_calls": 17,
+      "successful_calls": 17,
       "failed_calls": 0,
-      "avg_response_time_ms": 4.719376564025879,
-      "last_used": "2026-02-04T22:27:59.534954"
+      "avg_response_time_ms": 25211.15482554716,
+      "last_used": "2026-02-05T13:59:56.107753"
     },
     "workflow_social_content": {
       "skill_name": "workflow_social_content",
-      "total_calls": 8,
-      "successful_calls": 8,
+      "total_calls": 10,
+      "successful_calls": 10,
       "failed_calls": 0,
-      "avg_response_time_ms": 4329.62429523468,
-      "last_used": "2026-02-04T22:27:59.540692"
+      "avg_response_time_ms": 3463.745617866516,
+      "last_used": "2026-02-05T12:58:04.665241"
     },
     "workflow_idle": {
       "skill_name": "workflow_idle",
-      "total_calls": 6,
-      "successful_calls": 6,
+      "total_calls": 12,
+      "successful_calls": 12,
       "failed_calls": 0,
-      "avg_response_time_ms": 32974.80754057566,
-      "last_used": "2026-02-04T22:32:24.983546"
+      "avg_response_time_ms": 17009.714245796204,
+      "last_used": "2026-02-05T14:00:05.759437"
     },
     "workflow_restart_confirm": {
       "skill_name": "workflow_restart_confirm",
@@ -66,8 +66,8 @@
     }
   },
   "daily_stats": {
-    "2026-02-04": {
-      "messages": 2,
+    "2026-02-05": {
+      "messages": 1,
       "errors": 0,
       "avg_response_time": 0.0
     }
